@@ -1,3 +1,6 @@
 cache/
 *.graphml
 .vscode/
+test_results.txt
+.coverage
+__pycache__

@@ -28,6 +28,9 @@ def create_graph(
         simplify: Whether to simplify the graph or not.
     """
 
+    if area_type not in ["location", "polygon"]:
+        raise ValueError(f"area_type must be 'location' or 'polygon', got {area_type}")
+
     if area_type == "location":
         assert isinstance(
             graph_area, (str, dict, list)
@@ -44,9 +47,20 @@ def create_graph(
     graph = ox.add_edge_speeds(graph)  # Adding missing edge speeds
     graph = ox.add_edge_travel_times(graph)  # Adding missing edge travel times
 
-    if file_path is not "":
+    if file_path != "":
         ox.save_graphml(graph, file_path)
 
+    return graph
+
+
+def load_graph(file_path: str) -> nx.MultiDiGraph:
+    """
+    Load the graph from the given file path.
+
+    Args:
+        file_path: The file path to load the graph from.
+    """
+    graph = ox.load_graphml(file_path)
     return graph
 
 
@@ -58,14 +72,14 @@ def compute_edge_travel_times(
 
     Args:
         graph: The graph to compute the travel time on
-        source: The source node coordinates (x,y)
-        target: The target node coordinates (x,y)
+        source: The source node coordinates (y,x) (lat,long)
+        target: The target node coordinates (y,x) (lat,long)
 
     Returns:
         The travel time between the source and target nodes
     """
-    source_node = ox.nearest_nodes(graph, X=source[0], Y=source[1])
-    target_node = ox.nearest_nodes(graph, X=target[0], Y=target[1])
+    source_node = ox.nearest_nodes(graph, Y=source[0], X=source[1])
+    target_node = ox.nearest_nodes(graph, Y=target[0], X=target[1])
 
     travel_time = nx.shortest_path_length(
         graph, source_node, target_node, weight="travel_time"
@@ -78,7 +92,7 @@ def generate_distance_matrix(
     graph: nx.MultiDiGraph,
     locations: list[tuple[float, float]],
     depot: tuple[float, float],
-    type: Literal["symmetric", "asymmetric"],
+    distance_type: Literal["symmetric", "asymmetric"],
 ) -> np.ndarray:
     """
     Generate the distance matrix D for the given set of customer locations.
@@ -87,23 +101,30 @@ def generate_distance_matrix(
 
     Args:
         graph: The graph to compute the travel time on
-        locations: List of tuples of coordinates (x,y) representing the different locations
-        depot: Depot location (x,y) to serve the locations
+        locations: List of tuples of coordinates (y,x) (lat,long) representing the different locations
+        depot: Depot location (y,x) (lat,long) to serve the locations
         type: Type of distances. It can be either symmetric or asymmetric.
     """
 
     D_mat = np.zeros((len(locations) + 1, len(locations) + 1))
 
+    if distance_type not in ["symmetric", "asymmetric"]:
+        raise ValueError(
+            f"distance_type must be 'symmetric' or 'asymmetric', got {distance_type}"
+        )
+
     # We put the depot at the first element in D_mat
-    if type == "symmetric":
+    if distance_type == "symmetric":
         for i in range(len(locations)):
             for j in range(i, len(locations)):
-                travel_time = 0.5 * (
-                    compute_edge_travel_times(graph, locations[i], locations[j])
-                    + compute_edge_travel_times(graph, locations[j], locations[i])
-                )
-                D_mat[i + 1, j + 1] = travel_time
-                D_mat[j + 1, i + 1] = travel_time
+                if i != j:
+                    travel_time = 0.5 * (
+                        compute_edge_travel_times(graph, locations[i], locations[j])
+                        + compute_edge_travel_times(graph, locations[j], locations[i])
+                    )
+                    print(travel_time)
+                    D_mat[i + 1, j + 1] = travel_time
+                    D_mat[j + 1, i + 1] = travel_time
 
         for i in range(len(locations)):
             travel_time_to_depot = 0.5 * (
@@ -113,7 +134,7 @@ def generate_distance_matrix(
             D_mat[0, i + 1] = travel_time_to_depot
             D_mat[i + 1, 0] = travel_time_to_depot
 
-    elif type == "asymmetric":
+    elif distance_type == "asymmetric":
         for i in range(len(locations)):
             for j in range(len(locations)):
                 if i != j:
@@ -126,3 +147,15 @@ def generate_distance_matrix(
             D_mat[i + 1, 0] = compute_edge_travel_times(graph, locations[i], depot)
 
     return D_mat
+
+
+# if __name__ == "__main__":
+#     # Example for the location Zurich, Switzerland
+#     # graph = create_graph(
+#     #     "Zurich, Switzerland", file_path="zurich.graphml", simplify=True
+#     # )
+#     graph = load_graph("src/data/zurich.graphml")
+#     locations = [(47.352810, 8.530466), (47.361336, 8.551344), (47.392781, 8.528951)]
+#     depot = (47.374267, 8.541208)
+#     D_mat = generate_distance_matrix(graph, locations, depot, distance_type="symmetric")
+#     print(D_mat)
