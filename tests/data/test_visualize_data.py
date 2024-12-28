@@ -1,7 +1,11 @@
 import pytest
 import matplotlib.pyplot as plt
 import networkx as nx
-from data.visualize_data import visualize_graph, visualize_locations
+from data.visualize_data import (
+    visualize_graph,
+    visualize_locations,
+    visualize_cvrp_solution,
+)
 from data.generate_data import create_graph
 
 from matplotlib.axes._axes import Axes
@@ -15,6 +19,17 @@ pytest.fixture
 @pytest.fixture
 def sample_locations():
     return [(47.352810, 8.530466), (47.361336, 8.551344), (47.392781, 8.528951)]
+
+
+@pytest.fixture
+def sample_node_sequence():
+    return [
+        (47.374267, 8.541208),
+        (47.352810, 8.530466),
+        (47.361336, 8.551344),
+        (47.392781, 8.528951),
+        (47.374267, 8.541208),
+    ]
 
 
 @pytest.fixture
@@ -99,6 +114,53 @@ def test_visualize_locations_save(
         fig, ax = visualize_locations(
             sample_graph,
             sample_locations,
+            sample_depot,
+            file_path_save=str(file_path),
+            show=True,
+        )
+
+        # Verify show was called
+        assert mock_show.called
+        # Verify file was saved
+        assert file_path.exists()
+        assert file_path.stat().st_size > 0
+
+        plt.close(fig)
+
+
+def test_visualize_cvrp_solution_basic(
+    sample_graph, sample_node_sequence, sample_depot
+):
+    fig, ax = visualize_cvrp_solution(
+        sample_graph, sample_node_sequence, sample_depot, show=False
+    )
+
+    # Check return types
+    assert isinstance(fig, Figure)
+    assert isinstance(ax, Axes)
+
+    # Verify plot elements (scatter plots and path)
+    assert len(ax.collections) >= 2  # At least depot and customers
+
+    # Check legend exists and contains required elements
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_texts = [text.get_text() for text in legend.get_texts()]
+    assert "Depot" in legend_texts
+    assert "Customers" in legend_texts
+
+    plt.close(fig)
+
+
+def test_visualize_cvrp_solution_save(
+    sample_graph, sample_node_sequence, sample_depot, tmp_path
+):
+    file_path = tmp_path / "test_solution.png"
+
+    with patch("matplotlib.pyplot.show") as mock_show:
+        fig, ax = visualize_cvrp_solution(
+            sample_graph,
+            sample_node_sequence,
             sample_depot,
             file_path_save=str(file_path),
             show=True,
