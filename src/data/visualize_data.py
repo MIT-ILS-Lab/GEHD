@@ -239,15 +239,15 @@ def visualize_cvrp_solution(
 #     )
 
 
-# if __name__ == "__main__":
-#     graph = load_graph("src/data/zurich.graphml")
-#     locations = [(47.352810, 8.530466), (47.361336, 8.551344), (47.392781, 8.528951)]
-#     depot = (47.374267, 8.541208)
-#     fig, ax = visualize_locations(
-#         graph,
-#         locations,
-#         depot,
-#         show=True,
-#         file_path_save="src/data/zurich_customers.png",
-#     )
-# visualize_graph(graph, file_path_save="src/data/zurich.png")
+if __name__ == "__main__":
+    graph = load_graph("src/data/zurich.graphml")
+    locations = [(47.352810, 8.530466), (47.361336, 8.551344), (47.392781, 8.528951)]
+    depot = (47.374267, 8.541208)
+    fig, ax = visualize_locations(
+        graph,
+        locations,
+        depot,
+        show=True,
+        file_path_save="src/data/zurich_customers.png",
+    )
+    visualize_graph(graph, file_path_save="src/data/zurich.png")
