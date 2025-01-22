@@ -27,6 +27,17 @@ def load_config(config_file):
     return config
 
 
+def load_graph(file_path: str) -> nx.MultiDiGraph:
+    """
+    Load the graph from the given file path.
+
+    Args:
+        file_path: The file path to load the graph from.
+    """
+    graph = ox.load_graphml(file_path)
+    return graph
+
+
 def sample_points(graph: nx.MultiDiGraph, num_points: int) -> list[int]:
     """
     Sample points from the graph.
