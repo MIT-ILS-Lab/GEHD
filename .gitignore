@@ -5,3 +5,4 @@ test_results.txt
 .coverage
 __pycache__
 *.png
+*.npy
