@@ -1,0 +1,6 @@
+data:
+  location: "Zurich, Switzerland"
+  num_points: 10
+  graph_file: "src/data/zurich.graphml"
+  matrix_file: "src/data/D_mat.npy"
+  locations_file: "src/data/locations.npy"
