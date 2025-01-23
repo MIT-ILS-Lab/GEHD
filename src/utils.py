@@ -1,18 +1,13 @@
 """
-Utility functions for the project.
+Utility functions for the project using igraph.
 """
 
 import numpy as np
-import osmnx as ox
-import networkx as nx
-
+import igraph as ig
 import yaml
 
-from typing import Literal
-from shapely import Polygon, MultiPolygon
 
-
-def load_config(config_file):
+def load_config(config_file: str) -> dict:
     """
     Loads a YAML configuration file.
 
@@ -27,33 +22,36 @@ def load_config(config_file):
     return config
 
 
-def load_graph(file_path: str) -> nx.MultiDiGraph:
+def load_graph(file_path: str) -> ig.Graph:
     """
-    Load the graph from the given file path.
+    Load an igraph object from a file.
 
     Args:
         file_path: The file path to load the graph from.
+
+    Returns:
+        ig.Graph: The loaded igraph object.
     """
-    graph = ox.load_graphml(file_path)
+    graph = ig.Graph.Read_Pickle(file_path)
     return graph
 
 
-def sample_points(graph: nx.MultiDiGraph, num_points: int) -> list[int]:
+def sample_points(graph: ig.Graph, num_points: int) -> list[int]:
     """
-    Sample points from the graph.
+    Sample points (vertices) from the igraph graph.
 
     Args:
+        graph: The igraph graph to sample the points from.
         num_points: The number of points to sample.
-        graph: The graph to sample the points from.
 
     Returns:
-        nodes: The sampled node IDs from the underlying graph.
+        list[int]: The sampled vertex IDs from the graph.
     """
-    assert num_points <= len(
-        graph.nodes
-    ), "num_points must be less than the number of nodes in the graph"
+    assert (
+        num_points <= graph.vcount()
+    ), "num_points must be less than the number of vertices in the graph"
 
-    nodes = np.random.choice(list(graph.nodes), num_points, replace=False)
-    # nodes = [(graph.nodes[node]["y"], graph.nodes[node]["x"]) for node in nodes]
+    # Randomly sample vertex IDs (indices in igraph)
+    nodes = np.random.choice(graph.vs.indices, num_points, replace=False)
 
-    return nodes  # type: ignore
+    return nodes.tolist()

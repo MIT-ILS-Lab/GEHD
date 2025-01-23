@@ -1,20 +1,11 @@
-"""
-A module to generate the reallife data set using osmnx (ox).
-Uses vectorized shortest_path for efficiency.
-Considers only asymmetric distances.
-"""
-
-import numpy as np
-import osmnx as ox
+import igraph as ig
 import networkx as nx
-
-from typing import Literal
-from shapely import Polygon, MultiPolygon
-
+import numpy as np
 from tqdm import tqdm
 import time
-
-from utils import load_config, sample_points, load_graph
+from typing import Literal
+from shapely import Polygon, MultiPolygon
+from utils import load_config, sample_points
 
 
 def create_graph(
@@ -25,70 +16,65 @@ def create_graph(
     area_type: Literal["location", "polygon"] = "location",
     simplify: bool = False,
 ):
-    """Creates a graph from a location or polygon using osmnx."""
+    """Creates a graph from a location or polygon using osmnx and converts to igraph."""
+    import osmnx as ox
+
     if area_type not in ["location", "polygon"]:
         raise ValueError(f"area_type must be 'location' or 'polygon', got {area_type}")
 
     if area_type == "location":
-        assert isinstance(
-            graph_area, (str, dict, list)
-        ), "graph_area must be str, dict, or list for location"
-        G = ox.graph_from_place(graph_area, network_type="drive", simplify=simplify)
+        G_nx = ox.graph_from_place(graph_area, network_type="drive", simplify=simplify)
     else:
-        assert isinstance(
-            graph_area, (Polygon, MultiPolygon)
-        ), "graph_area must be Polygon or MultiPolygon"
-        G = ox.graph_from_polygon(graph_area, network_type="drive", simplify=simplify)
+        G_nx = ox.graph_from_polygon(
+            graph_area, network_type="drive", simplify=simplify
+        )
 
-    G = ox.add_edge_speeds(G)
-    G = ox.add_edge_travel_times(G)
+    G_nx = ox.add_edge_speeds(G_nx)
+    G_nx = ox.add_edge_travel_times(G_nx)
 
-    # Reduce graph to biggest strongly connected component
-    scc = max(nx.strongly_connected_components(G), key=len)
-    G.remove_nodes_from(set(G.nodes) - scc)
+    # Reduce to the largest strongly connected component
+    scc = max(nx.strongly_connected_components(G_nx), key=len)
+    G_nx = G_nx.subgraph(scc).copy()
+
+    osmids = list(G_nx.nodes)
+    # give each node its original osmid as attribute since we relabeled them
+    osmid_values = {k: v for k, v in zip(G_nx.nodes, osmids)}
+    nx.set_node_attributes(G_nx, osmid_values, "osmid")
+
+    G_nx = nx.relabel.convert_node_labels_to_integers(G_nx)
+
+    # Convert networkx graph to igraph
+    G_ig = ig.Graph(directed=True)
+    G_ig.add_vertices(list(G_nx.nodes))
+    G_ig.add_edges(list(G_nx.edges()))
+    G_ig.vs["name"] = [str(node) for node in G_nx.nodes]
+    G_ig.vs["osmid"] = osmids
+    G_ig.es["travel_time"] = list(nx.get_edge_attributes(G_nx, "travel_time").values())
 
     if file_path:
-        ox.save_graphml(G, file_path)
-    return G
+        G_ig.write_pickle(file_path)
+
+    return G_ig
 
 
-def compute_travel_times_vectorized(G, origins, destinations):
-    """Computes travel times using vectorized shortest_path."""
-    try:
-        routes = ox.shortest_path(
-            G, origins, destinations, weight="travel_time", cpus=None
-        )  # Let ox handle CPU usage
-        travel_times = []
-        for route in routes:
-            if route:
-                if len(route) == 1:
-                    travel_times.append(0)
-                else:
-                    travel_times.append(
-                        sum(
-                            ox.routing.route_to_gdf(G, route, weight="travel_time")[
-                                "travel_time"
-                            ]
-                        )
-                    )
-            else:
-                travel_times.append(np.inf)
-        return np.array(travel_times)
-    except Exception as e:
-        print(f"Error in vectorized routing: {e}")
-        return np.full(len(origins), np.inf)  # Return infinities in case of error
+def compute_travel_times_igraph(G: ig.Graph, origins: list, destinations: list):
+    """Computes travel times using igraph's distances method."""
+    origin_indices = [G.vs.find(name=str(origin)).index for origin in origins]
+    destination_indices = [
+        G.vs.find(name=str(destination)).index for destination in destinations
+    ]
+
+    # Compute pairwise distances
+    travel_times = G.distances(
+        source=origin_indices, target=destination_indices, weights="travel_time"
+    )
+    return np.array(travel_times)
 
 
-def generate_distance_matrix(G, points):
-    """Generates the *asymmetric* distance matrix using vectorized routing."""
-    n = len(points)
-    D_mat = np.full((n, n), np.inf)
-
-    for i in tqdm(range(n), desc="Generating Distance Matrix"):
-        origins = [points[i]] * n  # Repeat the origin n times
-        destinations = points  # All points as destinations
-        travel_times = compute_travel_times_vectorized(G, origins, destinations)
-        D_mat[i, :] = travel_times  # Assign to the i-th row
+def generate_distance_matrix(G: ig.Graph, points: list):
+    """Generates the *asymmetric* distance matrix using igraph."""
+    print("Generating Distance Matrix...")
+    D_mat = compute_travel_times_igraph(G, points, points)
     return D_mat
 
 
