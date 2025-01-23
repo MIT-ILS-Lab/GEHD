@@ -75,7 +75,15 @@ def generate_distance_matrix(G: ig.Graph, points: list):
     """Generates the *asymmetric* distance matrix using igraph."""
     print("Generating Distance Matrix...")
     D_mat = compute_travel_times_igraph(G, points, points)
+    print("Done generating Distance Matrix")
     return D_mat
+
+
+def generate_symmetric_matrix(D_mat: np.ndarray):
+    """Generates a symmetric matrix by averaging distances between i to j and j to i."""
+    print("Generating Symmetric Matrix...")
+    symmetric_D_mat = (D_mat + D_mat.T) / 2
+    return symmetric_D_mat
 
 
 if __name__ == "__main__":

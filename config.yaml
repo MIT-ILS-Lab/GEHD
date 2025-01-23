@@ -1,6 +1,6 @@
 data:
   location: "Zurich, Switzerland"
-  num_customers: 99
+  num_customers: 9999
   graph_file: "src/data/graph_data/zurich.graphml"
   matrix_file: "src/data/graph_data/D_mat.npy"
   locations_file: "src/data/graph_data/locations.npy"
