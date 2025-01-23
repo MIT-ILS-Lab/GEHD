@@ -49,8 +49,11 @@ def sample_points(graph: nx.MultiDiGraph, num_points: int) -> list[int]:
     Returns:
         nodes: The sampled node IDs from the underlying graph.
     """
-    nodes = np.random.choice(list(graph.nodes), num_points, replace=False)
+    assert num_points <= len(
+        graph.nodes
+    ), "num_points must be less than the number of nodes in the graph"
 
+    nodes = np.random.choice(list(graph.nodes), num_points, replace=False)
     # nodes = [(graph.nodes[node]["y"], graph.nodes[node]["x"]) for node in nodes]
 
     return nodes  # type: ignore

@@ -1,7 +1,7 @@
 data:
   location: "Zurich, Switzerland"
-  num_points: 10
-  graph_file: "src/data/zurich.graphml"
-  matrix_file: "src/data/D_mat.npy"
-  locations_file: "src/data/locations.npy"
+  num_customers: 99
+  graph_file: "src/data/graph_data/zurich.graphml"
+  matrix_file: "src/data/graph_data/D_mat.npy"
+  locations_file: "src/data/graph_data/locations.npy"
 use_multiprocessing: true
