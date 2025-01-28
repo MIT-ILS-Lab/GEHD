@@ -5,6 +5,8 @@ Utility functions for the project using igraph.
 import numpy as np
 import igraph as ig
 import yaml
+import osmnx as ox
+import networkx as nx
 
 
 def load_config(config_file: str) -> dict:
@@ -22,17 +24,14 @@ def load_config(config_file: str) -> dict:
     return config
 
 
-def load_graph(file_path: str) -> ig.Graph:
+def load_graph(file_path: str) -> nx.MultiDiGraph:
     """
-    Load an igraph object from a file.
+    Load the graph from the given file path.
 
     Args:
         file_path: The file path to load the graph from.
-
-    Returns:
-        ig.Graph: The loaded igraph object.
     """
-    graph = ig.Graph.Read_Pickle(file_path)
+    graph = ox.load_graphml(file_path)
     return graph
 
 
@@ -55,3 +54,24 @@ def sample_points(graph: ig.Graph, num_points: int) -> list[int]:
     nodes = np.random.choice(graph.vs.indices, num_points, replace=False)
 
     return nodes.tolist()
+
+
+def convert_nx_to_ig(G_nx: nx.MultiDiGraph) -> ig.Graph:
+    """Converts a networkx graph to igraph."""
+    osmids = list(G_nx.nodes)
+
+    # give each node its original osmid as attribute since we relabeled them
+    osmid_values = {k: v for k, v in zip(G_nx.nodes, osmids)}
+    nx.set_node_attributes(G_nx, osmid_values, "osmid")
+
+    G_nx = nx.relabel.convert_node_labels_to_integers(G_nx)
+
+    # Convert networkx graph to igraph
+    G_ig = ig.Graph(directed=True)
+    G_ig.add_vertices(list(G_nx.nodes))
+    G_ig.add_edges(list(G_nx.edges()))
+    G_ig.vs["name"] = [str(node) for node in G_nx.nodes]
+    G_ig.vs["osmid"] = osmids
+    G_ig.es["travel_time"] = list(nx.get_edge_attributes(G_nx, "travel_time").values())
+
+    return G_ig
