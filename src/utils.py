@@ -7,6 +7,7 @@ import igraph as ig
 import yaml
 import osmnx as ox
 import networkx as nx
+from sklearn.neighbors import NearestNeighbors
 
 
 def load_config(config_file: str) -> dict:
@@ -33,6 +34,21 @@ def load_graph(file_path: str) -> nx.MultiDiGraph:
     """
     graph = ox.load_graphml(file_path)
     return graph
+
+
+def load_manifold_data(config):
+    distance_matrix = np.load(config["manifold"]["matrix_file"])
+    graph = load_graph(config["manifold"]["graph_file"])
+    locations = np.load(config["manifold"]["locations_file"])
+
+    # Get (y, x) coordinates fo the locations
+    locations = [
+        [graph.nodes[location]["y"], graph.nodes[location]["x"]]
+        for location in graph.nodes
+    ]
+    locations = np.array(locations)
+
+    return distance_matrix, graph, locations
 
 
 def sample_points(graph: ig.Graph, num_points: int) -> list[int]:
@@ -75,3 +91,11 @@ def convert_nx_to_ig(G_nx: nx.MultiDiGraph) -> ig.Graph:
     G_ig.es["travel_time"] = list(nx.get_edge_attributes(G_nx, "travel_time").values())
 
     return G_ig
+
+
+def get_nearest_neighbors(vectors: np.ndarray, k: int) -> np.ndarray:
+    """Returns k-nn neighbors of each point in the dataset."""
+    nn = NearestNeighbors(n_neighbors=k, metric="euclidean")
+    nn.fit(vectors)
+    _, indices = nn.kneighbors(vectors)
+    return indices

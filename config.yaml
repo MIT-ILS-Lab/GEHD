@@ -4,4 +4,12 @@ data:
   graph_file: "src/data/graph_data/zurich.graphml"
   matrix_file: "src/data/graph_data/D_mat.npy"
   locations_file: "src/data/graph_data/locations.npy"
-use_multiprocessing: true
+
+manifold:
+  n_components: 3
+  n_neighbors: 200
+  graph_file: "src/data/graph_data/zurich.graphml"
+  matrix_file: "src/data/graph_data/D_mat.npy"
+  locations_file: "src/data/graph_data/locations.npy"
+
+
