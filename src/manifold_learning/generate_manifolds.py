@@ -9,6 +9,7 @@ from sklearn.manifold import (
 )
 from sklearn.decomposition import KernelPCA
 import umap.umap_ as umap
+from manifold_learning.pacmap_child import PaCMAPChild
 from utils import load_config, get_nearest_neighbors, load_manifold_data
 from manifold_learning.visualize_manifolds import (
     plot_interactive,
@@ -72,6 +73,15 @@ class ManifoldLearning:
         )
         return model.fit_transform(self.distance_matrix)
 
+    def apply_pacmap(self):
+        model = PaCMAPChild(
+            n_components=self.n_components,
+            n_neighbors=self.k,
+            distance="precomputed",
+            apply_pca=False,
+        )
+        return model.fit_transform(self.distance_matrix, init="random")
+
 
 def compute_jaccard_similarity(original_neighbors, reduced_neighbors, distance_matrix):
     jaccard_similarities = []
@@ -99,10 +109,11 @@ if __name__ == "__main__":
 
     # Choose methods to test
     models = [
+        (manifold_learning.apply_pacmap, "PaCMAP"),
         # (manifold_learning.apply_isomap, "Isomap"),
-        (manifold_learning.apply_lle, "LLE"),
-        (manifold_learning.apply_lle(method="hessian"), "Hessian LLE"),
-        (manifold_learning.apply_lle(method="modified"), "Modified LLE"),
+        # (manifold_learning.apply_lle, "LLE"),
+        # (manifold_learning.apply_lle(method="hessian"), "Hessian LLE"),
+        # (manifold_learning.apply_lle(method="modified"), "Modified LLE"),
         # (manifold_learning.apply_lle(method="ltsa"), "LTSA"),
         # (manifold_learning.apply_tsne, "t-SNE"),
         # (manifold_learning.apply_umap, "UMAP"),
@@ -125,7 +136,7 @@ if __name__ == "__main__":
             print(f"{title} failed: {e}")
 
     # Visualization
-    plot_subplots(embeddings, titles, plot_shape=(1, 3), n_components=n_components)
+    plot_subplots(embeddings, titles, plot_shape=(1, 1), n_components=n_components)
     plot_2d_locations(locations, title="Original Locations")
 
     # Compute and print Jaccard similarities
