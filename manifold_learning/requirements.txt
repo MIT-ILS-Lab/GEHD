@@ -1,0 +1,15 @@
+matplotlib
+networkx
+numpy<2
+osmnx
+plotly
+pytest
+python_igraph
+PyYAML
+scikit_learn
+pacmap
+trimap
+Shapely
+tqdm
+umap_learn
+trimap

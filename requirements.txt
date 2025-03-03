@@ -1,9 +1,0 @@
-matplotlib
-networkx
-igraph
-numpy
-osmnx
-pytest
-PyYAML
-Shapely
-tqdm

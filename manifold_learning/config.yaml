@@ -7,7 +7,7 @@ data:
 
 manifold:
   n_components: 3
-  n_neighbors: 200
+  n_neighbors: 50
   graph_file: "src/data/graph_data/zurich.graphml"
   matrix_file: "src/data/graph_data/D_mat.npy"
   locations_file: "src/data/graph_data/locations.npy"

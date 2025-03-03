@@ -1,5 +1,9 @@
+"""
+This is a set of functions to generate the underlying manifolds for a given distance function.
+"""
+
 import numpy as np
-import matplotlib.pyplot as plt
+from trimap import TRIMAP
 from sklearn.manifold import (
     Isomap,
     LocallyLinearEmbedding,
@@ -60,8 +64,8 @@ class ManifoldLearning:
         )
         return model.fit_transform(self.distance_matrix)
 
-    def apply_kernel_pca(self):
-        model = KernelPCA(n_components=self.n_components, kernel="precomputed")
+    def apply_kernel_pca(self, kernel: str = "rbf"):
+        model = KernelPCA(n_components=self.n_components, kernel=kernel)
         return model.fit_transform(self.distance_matrix)
 
     def apply_mds(self, metric=True):
@@ -81,6 +85,12 @@ class ManifoldLearning:
             apply_pca=False,
         )
         return model.fit_transform(self.distance_matrix, init="random")
+
+    def apply_trimap(self):
+        model = TRIMAP(
+            n_dims=self.n_components, n_inliers=self.k, n_outliers=self.k // 2
+        )
+        return model.fit_transform(self.distance_matrix)
 
 
 def compute_jaccard_similarity(original_neighbors, reduced_neighbors, distance_matrix):
@@ -109,7 +119,8 @@ if __name__ == "__main__":
 
     # Choose methods to test
     models = [
-        (manifold_learning.apply_pacmap, "PaCMAP"),
+        # (manifold_learning.apply_pacmap, "PaCMAP"),
+        # (manifold_learning.apply_trimap, "TRIMAP"),
         # (manifold_learning.apply_isomap, "Isomap"),
         # (manifold_learning.apply_lle, "LLE"),
         # (manifold_learning.apply_lle(method="hessian"), "Hessian LLE"),
@@ -118,7 +129,7 @@ if __name__ == "__main__":
         # (manifold_learning.apply_tsne, "t-SNE"),
         # (manifold_learning.apply_umap, "UMAP"),
         # (manifold_learning.apply_laplacian, "Laplacian Eigenmaps"),
-        # (manifold_learning.apply_kernel_pca, "Kernel PCA"),
+        (manifold_learning.apply_kernel_pca, "Kernel PCA"),
         # (lambda: manifold_learning.apply_mds(metric=True), "MDS (Metric)"),
         # (lambda: manifold_learning.apply_mds(metric=False), "MDS (Non-Metric)"),
     ]
@@ -136,7 +147,9 @@ if __name__ == "__main__":
             print(f"{title} failed: {e}")
 
     # Visualization
-    plot_subplots(embeddings, titles, plot_shape=(1, 1), n_components=n_components)
+    plot_subplots(
+        embeddings, titles, plot_shape=(1, len(models)), n_components=n_components
+    )
     plot_2d_locations(locations, title="Original Locations")
 
     # Compute and print Jaccard similarities

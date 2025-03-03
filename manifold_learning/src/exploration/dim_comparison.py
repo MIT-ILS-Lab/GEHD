@@ -67,7 +67,7 @@ if __name__ == "__main__":
     original_neighbors = get_nearest_neighbors(distance_matrix, k)
 
     # Dimensions to check
-    dimensions = [40, 30, 20, 10, 9, 8, 7, 6, 5, 4, 3, 2]
+    dimensions = [13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
 
     # Initialize dictionary to store results
     results = {
@@ -95,34 +95,34 @@ if __name__ == "__main__":
     }
 
     # Isomap
-    for dim in tqdm(dimensions, desc="Running Isomap"):
-        print(f"\nRunning Isomap for dimension {dim}")
-        isomap = Isomap(n_neighbors=k, n_components=dim, n_jobs=-1)
-        reduced_embedding_isomap = isomap.fit_transform(distance_matrix)
+    # for dim in tqdm(dimensions, desc="Running Isomap"):
+    #     print(f"\nRunning Isomap for dimension {dim}")
+    #     isomap = Isomap(n_neighbors=k, n_components=dim, n_jobs=-1)
+    #     reduced_embedding_isomap = isomap.fit_transform(distance_matrix)
 
-        reduced_neighbors_isomap = get_nearest_neighbors(reduced_embedding_isomap, k)
-        dist_matrix_emb_isomap = pairwise_distances(reduced_embedding_isomap)
-        dist_matrix_emb_isomap = normalize_distances(dist_matrix_emb_isomap)
+    #     reduced_neighbors_isomap = get_nearest_neighbors(reduced_embedding_isomap, k)
+    #     dist_matrix_emb_isomap = pairwise_distances(reduced_embedding_isomap)
+    #     dist_matrix_emb_isomap = normalize_distances(dist_matrix_emb_isomap)
 
-        rec_error_isomap = isomap.reconstruction_error()
-        print(f"Reconstruction error: {rec_error_isomap}")
+    #     rec_error_isomap = isomap.reconstruction_error()
+    #     print(f"Reconstruction error: {rec_error_isomap}")
 
-        jaccard_similarity_isomap = compute_jaccard_similarity(
-            original_neighbors, reduced_neighbors_isomap, distance_matrix
-        )
-        print(f"Jaccard similarity: {jaccard_similarity_isomap}")
+    #     jaccard_similarity_isomap = compute_jaccard_similarity(
+    #         original_neighbors, reduced_neighbors_isomap, distance_matrix
+    #     )
+    #     print(f"Jaccard similarity: {jaccard_similarity_isomap}")
 
-        relative_distance_error_isomap = compute_relative_distances(
-            dist_matrix_emb_isomap, original_neighbors, k
-        )
-        print(f"Relative distance error: {relative_distance_error_isomap}")
+    #     relative_distance_error_isomap = compute_relative_distances(
+    #         dist_matrix_emb_isomap, original_neighbors, k
+    #     )
+    #     print(f"Relative distance error: {relative_distance_error_isomap}")
 
-        results["rec_error_isomap"].append(rec_error_isomap)
-        results["jaccard_scores_isomap"].append(jaccard_similarity_isomap)
-        results["distance_errors_isomap"].append(relative_distance_error_isomap)
+    #     results["rec_error_isomap"].append(rec_error_isomap)
+    #     results["jaccard_scores_isomap"].append(jaccard_similarity_isomap)
+    #     results["distance_errors_isomap"].append(relative_distance_error_isomap)
 
-        # Save the results after the Isomap loop
-        save_results(results, "all_results.pkl")
+    #     # Save the results after the Isomap loop
+    #     save_results(results, "all_results.pkl")
 
     # Loop through dimensions and apply manifold learning models
     for dim in tqdm(dimensions, desc="Running manifold learning models"):
@@ -235,102 +235,102 @@ if __name__ == "__main__":
         # Save the results after LLE Modified loop
         save_results(results, "all_results.pkl")
 
-        # t-SNE
-        print(f"\nRunning t-SNE for dimension {dim}")
-        tsne = TSNE(
-            n_components=dim,
-            metric="precomputed",
-            random_state=42,
-            init="random",
-            perplexity=k,
-            n_jobs=-1,
-        )
-        reduced_embedding_tsne = tsne.fit_transform(distance_matrix)
+        # # t-SNE
+        # print(f"\nRunning t-SNE for dimension {dim}")
+        # tsne = TSNE(
+        #     n_components=dim,
+        #     metric="precomputed",
+        #     random_state=42,
+        #     init="random",
+        #     perplexity=k,
+        #     n_jobs=-1,
+        # )
+        # reduced_embedding_tsne = tsne.fit_transform(distance_matrix)
 
-        reduced_neighbors_tsne = get_nearest_neighbors(reduced_embedding_tsne, k)
-        dist_matrix_emb_tsne = pairwise_distances(reduced_embedding_tsne)
-        dist_matrix_emb_tsne = normalize_distances(dist_matrix_emb_tsne)
+        # reduced_neighbors_tsne = get_nearest_neighbors(reduced_embedding_tsne, k)
+        # dist_matrix_emb_tsne = pairwise_distances(reduced_embedding_tsne)
+        # dist_matrix_emb_tsne = normalize_distances(dist_matrix_emb_tsne)
 
-        kl_divergence_tsne = tsne.kl_divergence_
-        print(f"KL divergence: {kl_divergence_tsne}")
+        # kl_divergence_tsne = tsne.kl_divergence_
+        # print(f"KL divergence: {kl_divergence_tsne}")
 
-        jaccard_similarity_tsne = compute_jaccard_similarity(
-            original_neighbors, reduced_neighbors_tsne, distance_matrix
-        )
-        print(f"Jaccard similarity: {jaccard_similarity_tsne}")
+        # jaccard_similarity_tsne = compute_jaccard_similarity(
+        #     original_neighbors, reduced_neighbors_tsne, distance_matrix
+        # )
+        # print(f"Jaccard similarity: {jaccard_similarity_tsne}")
 
-        relative_distance_error_tsne = compute_relative_distances(
-            dist_matrix_emb_tsne, original_neighbors, k
-        )
-        print(f"Relative distance error: {relative_distance_error_tsne}")
+        # relative_distance_error_tsne = compute_relative_distances(
+        #     dist_matrix_emb_tsne, original_neighbors, k
+        # )
+        # print(f"Relative distance error: {relative_distance_error_tsne}")
 
-        results["kl_divergence_tsne"].append(kl_divergence_tsne)
-        results["jaccard_scores_tsne"].append(jaccard_similarity_tsne)
-        results["distance_errors_tsne"].append(relative_distance_error_tsne)
+        # results["kl_divergence_tsne"].append(kl_divergence_tsne)
+        # results["jaccard_scores_tsne"].append(jaccard_similarity_tsne)
+        # results["distance_errors_tsne"].append(relative_distance_error_tsne)
 
-        # Save the results after t-SNE loop
-        save_results(results, "all_results.pkl")
+        # # Save the results after t-SNE loop
+        # save_results(results, "all_results.pkl")
 
-    # LTSA (Local Tangent Space Alignment)
-    for dim in tqdm(dimensions, desc="Running LTSA"):
-        print(f"\nRunning LTSA for dimension {dim}")
-        ltsa = LocallyLinearEmbedding(
-            n_neighbors=k, n_components=dim, method="ltsa", n_jobs=-1
-        )
-        reduced_embedding_ltsa = ltsa.fit_transform(distance_matrix)
+    # # LTSA (Local Tangent Space Alignment)
+    # for dim in tqdm(dimensions, desc="Running LTSA"):
+    #     print(f"\nRunning LTSA for dimension {dim}")
+    #     ltsa = LocallyLinearEmbedding(
+    #         n_neighbors=k, n_components=dim, method="ltsa", n_jobs=-1
+    #     )
+    #     reduced_embedding_ltsa = ltsa.fit_transform(distance_matrix)
 
-        reduced_neighbors_ltsa = get_nearest_neighbors(reduced_embedding_ltsa, k)
-        dist_matrix_emb_ltsa = pairwise_distances(reduced_embedding_ltsa)
-        dist_matrix_emb_ltsa = normalize_distances(dist_matrix_emb_ltsa)
+    #     reduced_neighbors_ltsa = get_nearest_neighbors(reduced_embedding_ltsa, k)
+    #     dist_matrix_emb_ltsa = pairwise_distances(reduced_embedding_ltsa)
+    #     dist_matrix_emb_ltsa = normalize_distances(dist_matrix_emb_ltsa)
 
-        rec_error_ltsa = ltsa.reconstruction_error_
-        print(f"Reconstruction error: {rec_error_ltsa}")
+    #     rec_error_ltsa = ltsa.reconstruction_error_
+    #     print(f"Reconstruction error: {rec_error_ltsa}")
 
-        jaccard_similarity_ltsa = compute_jaccard_similarity(
-            original_neighbors, reduced_neighbors_ltsa, distance_matrix
-        )
-        print(f"Jaccard similarity: {jaccard_similarity_ltsa}")
+    #     jaccard_similarity_ltsa = compute_jaccard_similarity(
+    #         original_neighbors, reduced_neighbors_ltsa, distance_matrix
+    #     )
+    #     print(f"Jaccard similarity: {jaccard_similarity_ltsa}")
 
-        relative_distance_error_ltsa = compute_relative_distances(
-            dist_matrix_emb_ltsa, original_neighbors, k
-        )
-        print(f"Relative distance error: {relative_distance_error_ltsa}")
+    #     relative_distance_error_ltsa = compute_relative_distances(
+    #         dist_matrix_emb_ltsa, original_neighbors, k
+    #     )
+    #     print(f"Relative distance error: {relative_distance_error_ltsa}")
 
-        results["rec_error_ltsa"].append(rec_error_ltsa)
-        results["jaccard_scores_ltsa"].append(jaccard_similarity_ltsa)
-        results["distance_errors_ltsa"].append(relative_distance_error_ltsa)
+    #     results["rec_error_ltsa"].append(rec_error_ltsa)
+    #     results["jaccard_scores_ltsa"].append(jaccard_similarity_ltsa)
+    #     results["distance_errors_ltsa"].append(relative_distance_error_ltsa)
 
-        # Save the results after LTSA loop
-        save_results(results, "all_results.pkl")
+    #     # Save the results after LTSA loop
+    #     save_results(results, "all_results.pkl")
 
-    # MDS
-    for dim in tqdm(dimensions, desc="Running MDS"):
-        print(f"\nRunning MDS for dimension {dim}")
-        mds = MDS(
-            n_components=dim, dissimilarity="precomputed", random_state=42, n_jobs=-1
-        )
-        reduced_embedding_mds = mds.fit_transform(distance_matrix)
+    # # MDS
+    # for dim in tqdm(dimensions, desc="Running MDS"):
+    #     print(f"\nRunning MDS for dimension {dim}")
+    #     mds = MDS(
+    #         n_components=dim, dissimilarity="precomputed", random_state=42, n_jobs=-1
+    #     )
+    #     reduced_embedding_mds = mds.fit_transform(distance_matrix)
 
-        reduced_neighbors_mds = get_nearest_neighbors(reduced_embedding_mds, k)
-        dist_matrix_emb_mds = pairwise_distances(reduced_embedding_mds)
-        dist_matrix_emb_mds = normalize_distances(dist_matrix_emb_mds)
+    #     reduced_neighbors_mds = get_nearest_neighbors(reduced_embedding_mds, k)
+    #     dist_matrix_emb_mds = pairwise_distances(reduced_embedding_mds)
+    #     dist_matrix_emb_mds = normalize_distances(dist_matrix_emb_mds)
 
-        stress_mds = mds.stress_
-        print(f"Stress: {stress_mds}")
+    #     stress_mds = mds.stress_
+    #     print(f"Stress: {stress_mds}")
 
-        jaccard_similarity_mds = compute_jaccard_similarity(
-            original_neighbors, reduced_neighbors_mds, distance_matrix
-        )
-        print(f"Jaccard similarity: {jaccard_similarity_mds}")
+    #     jaccard_similarity_mds = compute_jaccard_similarity(
+    #         original_neighbors, reduced_neighbors_mds, distance_matrix
+    #     )
+    #     print(f"Jaccard similarity: {jaccard_similarity_mds}")
 
-        relative_distance_error_mds = compute_relative_distances(
-            dist_matrix_emb_mds, original_neighbors, k
-        )
-        print(f"Relative distance error: {relative_distance_error_mds}")
+    #     relative_distance_error_mds = compute_relative_distances(
+    #         dist_matrix_emb_mds, original_neighbors, k
+    #     )
+    #     print(f"Relative distance error: {relative_distance_error_mds}")
 
-        results["stress_mds"].append(stress_mds)
-        results["jaccard_scores_mds"].append(jaccard_similarity_mds)
-        results["distance_errors_mds"].append(relative_distance_error_mds)
+    #     results["stress_mds"].append(stress_mds)
+    #     results["jaccard_scores_mds"].append(jaccard_similarity_mds)
+    #     results["distance_errors_mds"].append(relative_distance_error_mds)
 
-        # Save the results after MDS loop
-        save_results(results, "all_results.pkl")
+    #     # Save the results after MDS loop
+    #     save_results(results, "all_results.pkl")
