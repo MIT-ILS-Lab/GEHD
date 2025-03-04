@@ -1,0 +1,21 @@
+# General packages
+matplotlib==3.7.1
+numpy==1.23.5
+PyMCubes==0.1.2
+scikit_learn==1.1.3
+tqdm==4.65.0
+websockets==10.3
+tensorboard==2.17.0
+pygeodesic==0.1.9
+trimesh==4.6.4
+yacs==0.1.8
+polyscope==2.3.0
+
+# For the njupyter notebook
+pyglet==1.5.31
+
+# Pytorch installations
+torch
+torch-cluster
+torch-geometric
+torch-scatter
