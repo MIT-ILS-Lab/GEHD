@@ -20,9 +20,9 @@ SOLVER:
 DATA:
   preparation:
     # paths to the different meshes
-    path_to_mesh: main_model/disk/meshes
-    path_to_output_npz: main_model/disk/npz
-    path_to_output_filelist: main_model/disk/filelist
+    path_to_mesh: main_model/disk/meshes/
+    path_to_output_npz: main_model/disk/npz/
+    path_to_output_filelist: main_model/disk/filelist/
 
     # variables for splitting and distance generation
     split_ratio: 0.8

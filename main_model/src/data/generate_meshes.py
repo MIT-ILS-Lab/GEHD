@@ -4,12 +4,10 @@ import trimesh
 from gegnn.utils.thsolver import default_settings
 from gegnn.utils.thsolver.config import parse_args
 
-# initialize global settings
-default_settings._init()
-FLAGS = parse_args(config_path="main_model/config.yaml")
-
 if __name__ == "__main__":
-
+    # initialize global settings
+    default_settings._init()
+    FLAGS = parse_args(config_path="main_model/config.yaml")
     default_settings.set_global_values(FLAGS)
 
     # Define path to mesh directory

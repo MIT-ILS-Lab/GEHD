@@ -4,3 +4,7 @@ dist
 *.egg
 *.obj
 logs
+*.txt
+*.log
+*.obj
+disk
