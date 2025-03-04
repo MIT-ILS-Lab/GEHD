@@ -18,6 +18,23 @@ SOLVER:
   lr_power: 0.9
 
 DATA:
+  preparation:
+    # paths to the different meshes
+    path_to_mesh: main_model/disk/meshes
+    path_to_output_npz: main_model/disk/npz
+    path_to_output_filelist: main_model/disk/filelist
+
+    # variables for splitting and distance generation
+    split_ratio: 0.8
+    num_train_sources: 300
+    num_train_targets_per_source: 800
+    num_test_sources: 400
+    num_test_targets_per_source: 60
+
+    # variables for filtering and running
+    file_size_threshold: 12_048_576 # threshold to filter out large meshes
+    threads: 1
+
   train:
     # octree building
     depth: 6
