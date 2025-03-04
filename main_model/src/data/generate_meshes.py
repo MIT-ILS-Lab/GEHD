@@ -19,8 +19,8 @@ if __name__ == "__main__":
     # Generate simple meshes and save them as .obj files
     shapes = {
         # "cube": trimesh.creation.box(),
-        "sphere_train": trimesh.creation.icosphere(subdivisions=5),
-        "sphere_val": trimesh.creation.icosphere(subdivisions=5),
+        "sphere": trimesh.creation.icosphere(subdivisions=5),
+        "sphere_tilde": trimesh.creation.icosphere(subdivisions=5),
         # "cylinder": trimesh.creation.cylinder(radius=0.5, height=1.0),
     }
 
