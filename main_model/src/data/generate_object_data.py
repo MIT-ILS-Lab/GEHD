@@ -267,9 +267,13 @@ if __name__ == "__main__":
         # delete the dist_in
         os.remove(dist_in)
 
-        aa = mesh.edges_unique
-        bb = np.concatenate([aa[:, 1:], aa[:, :1]], 1)
-        cc = np.concatenate([aa, bb])
+        unique_edges = mesh.edges_unique
+        unique_edges_rev = np.concatenate(
+            [unique_edges[:, 1:], unique_edges[:, :1]], 1
+        )  # reverse edges
+        edges = np.concatenate(
+            [unique_edges, unique_edges_rev]
+        )  # add normal and reversed edge pairs for "undirectional" edges
 
         # sanity check
         vertices = mesh.vertices
@@ -280,7 +284,7 @@ if __name__ == "__main__":
 
         np.savez(
             filename_out,
-            edges=cc,
+            edges=edges,
             vertices=mesh.vertices.astype(np.float32),
             normals=mesh.vertex_normals.astype(np.float32),
             faces=mesh.faces.astype(np.float32),
@@ -327,12 +331,8 @@ if __name__ == "__main__":
                     data = f.read()
                 with open(object_name, "a") as f:
                     f.write(data)
-        except:
-            raise ValueError(
-                "Error on "
-                + object_name
-                + ", this is mostly due to non-manifold (failed to initialise the PyGeodesicAlgorithmExact class instance)"
-            )
+        except Exception as e:
+            print("Error:" + str(e))
 
         for each in thread_list:
             os.remove(each)
@@ -371,8 +371,9 @@ if __name__ == "__main__":
             dist_idx=dist[:, :2].astype(np.uint16),
         )
 
-    print("\nnpz data generation finished. Now generating filelist...\n")
-    train_lines = []  # filelist
+    print("\nThe npz data generation finished. Now generating filelist...\n")
+
+    train_lines = []
     for each in tqdm(train_objects):
         filename_out = PATH_TO_OUTPUT_NPZ + each.split("/")[-1] + ".npz"
         try:
@@ -389,7 +390,7 @@ if __name__ == "__main__":
         except Exception:
             raise ValueError("load " + filename_out + " failed...")
 
-    test_lines = []  # filelist
+    test_lines = []
     for each in tqdm(test_objects):
         filename_out = PATH_TO_OUTPUT_NPZ + each.split("/")[-1] + ".npz"
         try:
@@ -411,3 +412,5 @@ if __name__ == "__main__":
 
     with open(PATH_TO_OUTPUT_FILELIST + "filelist_test.txt", "w") as f:
         f.writelines(test_lines)
+
+    print("The filelist generation finished.")
