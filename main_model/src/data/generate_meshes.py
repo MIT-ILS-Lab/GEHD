@@ -4,14 +4,6 @@ import trimesh
 from gegnn.utils.thsolver import default_settings
 from gegnn.utils.thsolver.config import parse_args
 
-import inspect
-
-# Get the file path of the function definition
-file_path = inspect.getfile(parse_args)
-
-# Print the path
-print(f"The function 'parse_args' is defined in: {file_path}")
-
 # initialize global settings
 default_settings._init()
 FLAGS = parse_args(config_path="main_model/config.yaml")
