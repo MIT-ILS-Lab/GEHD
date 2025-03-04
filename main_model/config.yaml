@@ -1,12 +1,12 @@
 SOLVER:
   run: train
 
-  logdir: logs/my_run
+  # logging and processing
+  logdir: main_model/logs/encoder
   max_epoch: 500
   test_every_epoch: 20
   save_every_epoch: 50
   log_per_iter: 10
-  ckpt_num: 5
 
   # optimizer
   type: adamw
@@ -45,7 +45,7 @@ DATA:
 
     # data loading
     location: ./
-    filelist: ./data/filelist/filelist_train.txt
+    filelist: main_model/disk/filelist/filelist_train.txt
     batch_size: 1
     shuffle: True
     num_workers: 0
@@ -60,10 +60,10 @@ DATA:
 
     # data loading
     location: ./
-    filelist: ./data/filelist/filelist_test.txt
+    filelist: main_model/disk/filelist/filelist_test.txt
     batch_size: 4
     shuffle: True
-    num_workers: 10
+    num_workers: 8
 
 MODEL:
   name: unet
