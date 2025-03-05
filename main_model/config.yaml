@@ -70,10 +70,8 @@ MODEL:
   channel: 6
 
   nout: 256     # the final embedding dimension of each vertices
-  nempty: True
 
-  # SAGE, GAT, Edge, DirConv, DistConv, my
-  conv_type: my
+  conv_type: my # SAGE or my
   include_distance: True     # only appliable when use dist conv. if true, the distance between points will be concated to the feature.
 
   normal_aware_pooling: True  # when grid pooling, consider normal or not
@@ -82,5 +80,5 @@ MODEL:
 # visualization, will not affect the training/testing process, only visualization
 
   get_test_stat: False         # if true, evaluate the test set before visualization
- # test_mesh: 2323             # NOT finished: specify a mesh to evaluate in visualization system
+  output_dir: main_model/out/
 

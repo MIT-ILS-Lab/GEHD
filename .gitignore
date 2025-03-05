@@ -8,3 +8,5 @@ logs
 *.log
 *.obj
 disk
+*.ini
+*.npy

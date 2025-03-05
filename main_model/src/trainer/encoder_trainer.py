@@ -22,7 +22,7 @@ class GeGNNSolver(Solver):
 
     def get_model(self, flags):
         if flags.name.lower() == "unet":
-            model = GraphUNet(flags.channel, flags.nout, flags.interp, flags.nempty)
+            model = GraphUNet(flags.channel, flags.nout)
         else:
             raise ValueError("Unknown model name")
 
