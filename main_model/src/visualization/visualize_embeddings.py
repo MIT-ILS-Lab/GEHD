@@ -44,12 +44,14 @@ def read_mesh(path, to_tensor=True, device="cpu"):
     }
 
 
-# a wrapper of pretrained model
-class PretrainedGeGNN(nn.Module):
+# a wrapper for the pretrained model
+class PretrainedGeGnn(nn.Module):
     def __init__(self, ckpt_path, flags):
-        super(PretrainedGeGNN, self).__init__()
+        super(PretrainedGeGnn, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = GraphUNet(flags.channel, flags.nout).to(self.device)
+        self.model = GraphUNet(
+            flags.in_channels, flags.hidden_channels, flags.out_channels
+        ).to(self.device)
         self.embds = None
         ckpt = torch.load(ckpt_path, map_location=self.device)
         self.model.load_state_dict(ckpt["model_dict"])
@@ -144,7 +146,7 @@ def main(FLAGS):
         )
         start_pts = torch.tensor(int(args.start_pts)).to(device)
 
-        model = PretrainedGeGNN(args.ckpt_path, FLAGS.MODEL).to(device)
+        model = PretrainedGeGnn(args.ckpt_path, FLAGS.MODEL).to(device)
         model.precompute(obj_dic)
         dist_pred = model.SSAD([start_pts])[0]
         np.save(args.output, dist_pred.detach().cpu().numpy())

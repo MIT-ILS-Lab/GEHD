@@ -67,12 +67,13 @@ DATA:
 
 MODEL:
   name: unet
-  channel: 6
 
-  nout: 256     # the final embedding dimension of each vertices
+  in_channels: 6          # input dimension of each vertices
+  hidden_channels: 256    # hidden dimensions of the vertices
+  out_channels: 256       # the final embedding dimension of each vertices
 
   conv_type: my # SAGE or my
-  include_distance: True     # only appliable when use dist conv. if true, the distance between points will be concated to the feature.
+  include_distance: True      # only appliable when use dist conv. if true, the distance between points will be concated to the feature.
 
   normal_aware_pooling: True  # when grid pooling, consider normal or not
 

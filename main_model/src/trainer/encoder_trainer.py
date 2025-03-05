@@ -15,14 +15,16 @@ def get_parameter_number(model):
     return {"Total": total_num, "Trainable": trainable_num}
 
 
-class GeGNNSolver(Solver):
+class GeGnnSolver(Solver):
     def __init__(self, FLAGS, is_master=True):
         super().__init__(FLAGS, is_master)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def get_model(self, flags):
         if flags.name.lower() == "unet":
-            model = GraphUNet(flags.channel, flags.nout)
+            model = GraphUNet(
+                flags.in_channels, flags.hidden_channels, flags.out_channels
+            )
         else:
             raise ValueError("Unknown model name")
 
@@ -91,5 +93,5 @@ if __name__ == "__main__":
     FLAGS = parse_args(config_path="main_model/config.yaml")
     default_settings.set_global_values(FLAGS)
 
-    solver = GeGNNSolver(FLAGS)
+    solver = GeGnnSolver(FLAGS)
     solver.run()
