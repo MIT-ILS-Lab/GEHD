@@ -1,17 +1,16 @@
 import os
 import trimesh
 
-from gegnn.utils.thsolver import default_settings
-from gegnn.utils.thsolver.config import parse_args
+from main_model.src.utils.config import load_config, parse_args
+
 
 if __name__ == "__main__":
-    # initialize global settings
-    default_settings._init()
-    FLAGS = parse_args(config_path="main_model/config.yaml")
-    default_settings.set_global_values(FLAGS)
+    # Load the config file
+    args = parse_args()
+    config = load_config(args.config)
 
     # Define path to mesh directory
-    PATH_TO_MESH = FLAGS.DATA.preparation.path_to_mesh
+    PATH_TO_MESH = config["data"]["preparation"]["path_to_mesh"]
 
     # List mesh files
     mesh_files = [f for f in os.listdir(PATH_TO_MESH) if f.endswith(".obj")]

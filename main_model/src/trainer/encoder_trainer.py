@@ -1,11 +1,8 @@
 import torch
 
-from hgraph.models.graph_unet import GraphUNet
-from gegnn.utils.thsolver import default_settings, Solver
-from gegnn.utils.thsolver.config import parse_args
-
-# from gegnn.dataset_ps import get_dataset
-
+from main_model.src.trainer.base_trainer import Solver
+from main_model.src.utils.hgraph.models.graph_unet import GraphUNet
+from main_model.src.utils.config import load_config, parse_args
 from main_model.src.data.encoder_dataloader import get_dataset
 
 
@@ -18,14 +15,14 @@ def get_parameter_number(model):
 
 
 class GeGnnSolver(Solver):
-    def __init__(self, FLAGS, is_master=True):
-        super().__init__(FLAGS, is_master)
+    def __init__(self, config, is_master=True):
+        super().__init__(config, is_master)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def get_model(self, flags):
-        if flags.name.lower() == "unet":
+    def get_model(self, config):
+        if config["name"].lower() == "unet":
             model = GraphUNet(
-                flags.in_channels, flags.hidden_channels, flags.out_channels
+                config["in_channels"], config["hidden_channels"], config["out_channels"]
             )
         else:
             raise ValueError("Unknown model name")
@@ -37,8 +34,8 @@ class GeGnnSolver(Solver):
         get_parameter_number(model)
         return model
 
-    def get_dataset(self, flags):
-        return get_dataset(flags)
+    def get_dataset(self, config):
+        return get_dataset(config)
 
     def model_forward(self, batch):
         """Equivalent to `self.get_embd` + `self.embd_decoder_func`"""
@@ -90,10 +87,9 @@ class GeGnnSolver(Solver):
 
 
 if __name__ == "__main__":
-    # Initialize global settings
-    default_settings._init()
-    FLAGS = parse_args(config_path="main_model/config.yaml")
-    default_settings.set_global_values(FLAGS)
+    # Load the config file
+    args = parse_args()
+    config = load_config(args.config)
 
-    solver = GeGnnSolver(FLAGS)
+    solver = GeGnnSolver(config)
     solver.run()

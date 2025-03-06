@@ -28,5 +28,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["gegnn", "main_model"]
+packages = ["manifold_learning", "main_model"]
 

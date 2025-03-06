@@ -1,4 +1,4 @@
-SOLVER:
+solver:
   run: train
 
   # logging and processing
@@ -17,7 +17,14 @@ SOLVER:
   lr_type: poly
   lr_power: 0.9
 
-DATA:
+  # others
+  progress_bar: True
+  rand_seed: -1 # fix the random seed if bigger than 0
+  empty_cache: True # empty the cache periodically
+  ckpt: "" # which checkpoint to load, None means no checkpoint
+  clip_grad: -1.0  # clip gradient norm (-1: disable)
+
+data:
   preparation:
     # paths to the different meshes
     path_to_mesh: main_model/disk/meshes/
@@ -47,7 +54,11 @@ DATA:
     filelist: main_model/disk/filelist/filelist_train.txt
     batch_size: 1
     shuffle: True
-    num_workers: 0
+    num_workers: 4
+
+    # others
+    disable: False # wether or not to disable the training set
+    take: -1  # number of samples used for training
 
   test:
     # data augmentations
@@ -61,9 +72,13 @@ DATA:
     filelist: main_model/disk/filelist/filelist_test.txt
     batch_size: 4
     shuffle: True
-    num_workers: 8
+    num_workers: 4
 
-MODEL:
+    # others
+    disable: False # wether or not to disable the test set
+    take: -1  # Number of samples used for testing
+
+model:
   name: unet
 
   in_channels: 6          # input dimension of each vertices
@@ -75,9 +90,7 @@ MODEL:
 
   normal_aware_pooling: True  # when grid pooling, consider normal or not
 
-
-# visualization, will not affect the training/testing process, only visualization
-
+  # visualization, will not affect the training/testing process, only visualization
   get_test_stat: False         # if true, evaluate the test set before visualization
   output_dir: main_model/out/
 

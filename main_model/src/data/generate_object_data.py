@@ -5,10 +5,9 @@ import numpy as np
 import trimesh
 from tqdm import tqdm
 
-import pygeodesic.geodesic as geodesic
+from pygeodesic import geodesic
 
-from gegnn.utils.thsolver import default_settings
-from gegnn.utils.thsolver.config import parse_args
+from main_model.src.utils.config import load_config, parse_args
 
 
 def visualize_ssad(vertices: np.ndarray, triangles: np.ndarray, source_index: int):
@@ -153,28 +152,31 @@ if __name__ == "__main__":
         file_size_threshold: int, file size threshold
         threads: int, number of threads. 0 uses all cores
     """
-    # Initialize global settings
-    default_settings._init()
-    FLAGS = parse_args(config_path="main_model/config.yaml")
-    default_settings.set_global_values(FLAGS)
+    # Load the config file
+    args = parse_args()
+    config = load_config(args.config)
 
     # Initialize paths
-    PATH_TO_MESH = FLAGS.DATA.preparation.path_to_mesh
-    PATH_TO_OUTPUT_NPZ = FLAGS.DATA.preparation.path_to_output_npz
-    PATH_TO_OUTPUT_FILELIST = FLAGS.DATA.preparation.path_to_output_filelist
+    PATH_TO_MESH = config["data"]["preparation"]["path_to_mesh"]
+    PATH_TO_OUTPUT_NPZ = config["data"]["preparation"]["path_to_output_npz"]
+    PATH_TO_OUTPUT_FILELIST = config["data"]["preparation"]["path_to_output_filelist"]
 
     # Define the parameters
-    SPLIT_RATIO = FLAGS.DATA.preparation.split_ratio
-    FILE_SIZE_THRESHOLD = FLAGS.DATA.preparation.file_size_threshold
+    SPLIT_RATIO = config["data"]["preparation"]["split_ratio"]
+    FILE_SIZE_THRESHOLD = config["data"]["preparation"]["file_size_threshold"]
     LARGE_DISTANCE_THRESHOLD = 1e8
 
     # number of sources and targets for sampling the distances
-    num_train_sources = FLAGS.DATA.preparation.num_train_sources
-    num_train_targets_per_source = FLAGS.DATA.preparation.num_train_targets_per_source
-    num_test_sources = FLAGS.DATA.preparation.num_test_sources
-    num_test_targets_per_source = FLAGS.DATA.preparation.num_test_targets_per_source
+    num_train_sources = config["data"]["preparation"]["num_train_sources"]
+    num_train_targets_per_source = config["data"]["preparation"][
+        "num_train_targets_per_source"
+    ]
+    num_test_sources = config["data"]["preparation"]["num_test_sources"]
+    num_test_targets_per_source = config["data"]["preparation"][
+        "num_test_targets_per_source"
+    ]
 
-    threads = FLAGS.DATA.preparation.threads
+    threads = config["data"]["preparation"]["threads"]
     object_name = None
 
     assert threads >= 0 and type(threads) == int

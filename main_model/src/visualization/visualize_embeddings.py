@@ -5,10 +5,9 @@ import trimesh
 import argparse
 import os
 
-from gegnn.utils.thsolver import default_settings
-from gegnn.utils.thsolver.config import parse_args
-from gegnn.hgraph.models.graph_unet import GraphUNet
-from gegnn.hgraph.hgraph import Data, HGraph
+from main_model.src.utils.config import load_config, parse_args
+from main_model.src.utils.hgraph.models.graph_unet import GraphUNet
+from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
 
 # a function that reads a triangular mesh, and generates its corresponding graph
@@ -46,11 +45,11 @@ def read_mesh(path, to_tensor=True, device="cpu"):
 
 # a wrapper for the pretrained model
 class PretrainedGeGnn(nn.Module):
-    def __init__(self, ckpt_path, flags):
+    def __init__(self, ckpt_path, config):
         super(PretrainedGeGnn, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = GraphUNet(
-            flags.in_channels, flags.hidden_channels, flags.out_channels
+            config["in_channels"], config["hidden_channels"], config["out_channels"]
         ).to(self.device)
         self.embds = None
         ckpt = torch.load(ckpt_path, map_location=self.device)
@@ -99,9 +98,9 @@ class PretrainedGeGnn(nn.Module):
 
 
 # a wrapper of pretrained model, so that it can be called directly from the command line
-def main(FLAGS):
+def main(config):
     # Load the latest checkpoint
-    logdir = FLAGS.SOLVER.logdir
+    logdir = config["solver"]["logdir"]
     ckpt_dir = os.path.join(logdir, "checkpoints")  # Checkpoint directory for past runs
 
     ckpt_files = [f for f in os.listdir(ckpt_dir) if f.endswith(".tar")]
@@ -109,12 +108,12 @@ def main(FLAGS):
     ckpt_path = os.path.join(ckpt_dir, ckpt_files[-1])
 
     # Create a path to the first mesh file
-    PATH_TO_MESH = FLAGS.DATA.preparation.path_to_mesh
+    PATH_TO_MESH = config["data"]["preparation"]["path_to_mesh"]
     mesh_files = [f for f in os.listdir(PATH_TO_MESH) if f.endswith(".obj")]
     test_file = os.path.join(PATH_TO_MESH, mesh_files[0])
 
     # Output directory
-    output_dir = FLAGS.MODEL.output_dir
+    output_dir = config["model"]["output_dir"]
     output_ssad = os.path.join(output_dir, "ssad_ours.npy")
     output_mesh = os.path.join(output_dir, "our_mesh.obj")
 
@@ -146,7 +145,7 @@ def main(FLAGS):
         )
         start_pts = torch.tensor(int(args.start_pts)).to(device)
 
-        model = PretrainedGeGnn(args.ckpt_path, FLAGS.MODEL).to(device)
+        model = PretrainedGeGnn(args.ckpt_path, config["model"]).to(device)
         model.precompute(obj_dic)
         dist_pred = model.SSAD([start_pts])[0]
         np.save(args.output, dist_pred.detach().cpu().numpy())
@@ -193,13 +192,12 @@ def main(FLAGS):
 
 
 if __name__ == "__main__":
-    # initialize global settings
-    default_settings._init()
-    FLAGS = parse_args(config_path="main_model/config.yaml")
-    default_settings.set_global_values(FLAGS)
+    # Load the config file
+    args = parse_args()
+    config = load_config(args.config)
 
     # Run main function
-    main(FLAGS)
+    main(config)
 
     ###################################
     # visualization via polyscope starts
@@ -210,7 +208,7 @@ if __name__ == "__main__":
     import trimesh
 
     # Output directory
-    output_dir = FLAGS.MODEL.output_dir
+    output_dir = config["model"]["output_dir"]
     output_ssad = os.path.join(output_dir, "ssad_ours.npy")
     output_mesh = os.path.join(output_dir, "our_mesh.obj")
 
