@@ -3,8 +3,10 @@ import torch
 from hgraph.models.graph_unet import GraphUNet
 from gegnn.utils.thsolver import default_settings, Solver
 from gegnn.utils.thsolver.config import parse_args
-from gegnn.utils import thsolver
-from gegnn.dataset_ps import get_dataset
+
+# from gegnn.dataset_ps import get_dataset
+
+from main_model.src.data.encoder_dataloader import get_dataset
 
 
 def get_parameter_number(model):

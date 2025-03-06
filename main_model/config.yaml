@@ -36,12 +36,11 @@ DATA:
     threads: 1
 
   train:
-    # octree building
-    depth: 6
-    full_depth: 2  #The octree layers with a depth smaller than `full_depth` are forced to be full.
-
     # data augmentations
-    distort: False
+    distort: True
+    angle: [10, 10, 10]
+    scale: 0.1
+    jitter: 0.1
 
     # data loading
     location: ./
@@ -51,12 +50,11 @@ DATA:
     num_workers: 0
 
   test:
-    # octree building
-    depth: 6
-    full_depth: 2
-
     # data augmentations
     distort: False
+    angle: [10, 10, 10]
+    scale: 0.1
+    jitter: 0.1
 
     # data loading
     location: ./

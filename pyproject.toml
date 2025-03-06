@@ -28,5 +28,5 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = ["gegnn"]
+packages = ["gegnn", "main_model"]
 

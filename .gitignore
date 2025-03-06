@@ -10,3 +10,5 @@ logs
 disk
 *.ini
 *.npy
+*.pyc
+__pycache__
