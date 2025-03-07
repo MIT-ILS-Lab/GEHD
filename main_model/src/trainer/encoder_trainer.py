@@ -1,16 +1,19 @@
 import torch
+import logging
 
 from main_model.src.trainer.base_trainer import Solver
 from main_model.src.utils.hgraph.models.graph_unet import GraphUNet
 from main_model.src.utils.config import load_config, parse_args
 from main_model.src.data.encoder_dataloader import get_dataset
 
+logger = logging.getLogger(__name__)
+
 
 def get_parameter_number(model):
-    """Print the number of parameters in a model on terminal."""
+    """Log the number of parameters in a model on terminal."""
     total_num = sum(p.numel() for p in model.parameters())
     trainable_num = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"\nTotal Parameters: {total_num}, trainable: {trainable_num}")
+    logger.info(f"\nTotal Parameters: {total_num}, trainable: {trainable_num}")
     return {"Total": total_num, "Trainable": trainable_num}
 
 
@@ -30,7 +33,7 @@ class GeGnnSolver(Solver):
         # Move model to the correct device
         model.to(self.device)
 
-        # Print the number of parameters
+        # Log the number of parameters
         get_parameter_number(model)
         return model
 
@@ -80,8 +83,20 @@ class GeGnnSolver(Solver):
         dist = batch["dist"].to(self.device)
         gt = dist[:, 2]
 
+        # option 1: Mean Absolute Error, MAE
+        # loss = torch.abs(pred - gt).mean()
+
+        # option 2: relative MAE
         loss = (torch.abs(pred - gt) / (gt + 1e-3)).mean()
-        loss = torch.clamp(loss, -10, 10)
+
+        # option 3: Mean Squared Error, MSE
+        # loss = torch.square(pred - gt).mean()
+
+        # option 4: relative MSE
+        # loss = torch.square((pred - gt) / (gt + 1e-3)).mean()
+
+        # option 5: root mean squared error, RMSE
+        # loss = torch.sqrt(torch.square(pred - gt).mean())
 
         return loss
 

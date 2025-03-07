@@ -2,9 +2,12 @@ import os
 import torch
 import numpy as np
 from tqdm import tqdm
+import logging
 
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
 from main_model.src.utils.general_utils import cumsum
+
+logger = logging.getLogger(__name__)
 
 
 def read_file(filename):
@@ -33,7 +36,7 @@ class Dataset(torch.utils.data.Dataset):
 
         self.filenames, self.labels = self.load_filenames()
         if self.in_memory:
-            print("Load files into memory from " + self.filelist)
+            logger.info("Load files into memory from " + self.filelist)
             self.samples = [
                 self.read_file(os.path.join(self.root, f))
                 for f in tqdm(self.filenames, ncols=80, leave=False)

@@ -4,10 +4,20 @@ import random
 import numpy as np
 import trimesh
 from tqdm import tqdm
+import logging
 
 from pygeodesic import geodesic
 
 from main_model.src.utils.config import load_config, parse_args
+
+logging.basicConfig(
+    level=logging.INFO,  # Set the logging level
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Define the log message format
+    handlers=[
+        logging.StreamHandler(),  # Send logs to the console (stdout)
+        # logging.FileHandler("my_log_file.log"),  # Optionally, write logs to a file
+    ],
+)
 
 
 def visualize_ssad(vertices: np.ndarray, triangles: np.ndarray, source_index: int):
@@ -125,7 +135,7 @@ def computation_thread(
     if idx == 0:
         tqdm_on = True
 
-    print(filename, object_name)
+    logging.info(filename + object_name)
     output = object_name + "_" + str(idx)
 
     data_prepare_gen_dataset(
@@ -183,9 +193,9 @@ if __name__ == "__main__":
 
     if threads == 0:
         threads = mp.cpu_count()
-        print(f"Automatically utilize all CPU cores ({threads})")
+        logging.info(f"Automatically utilize all CPU cores ({threads})")
     else:
-        print(f"{threads} CPU cores are utilized!")
+        logging.info(f"{threads} CPU cores are utilized!")
 
     # make dirs, if not exist
     if not os.path.exists(PATH_TO_OUTPUT_NPZ):
@@ -251,7 +261,7 @@ if __name__ == "__main__":
                 with open(object_name, "a") as f:
                     f.write(data)
         except Exception as e:
-            print("Error:" + str(e))
+            logging.info("error:" + str(e))
 
         for each in thread_list:
             os.remove(each)
@@ -262,9 +272,8 @@ if __name__ == "__main__":
         try:
             mesh = trimesh.load_mesh(filename_in)
             dist = np.loadtxt(dist_in)
-        except Exception:
-            print(f"load {filename_in} or {dist_in} failed...")
-            continue
+        except Exception as e:
+            logging.info(f"load {filename_in} or {dist_in} failed with error: {e}")
 
         # delete the dist_in
         os.remove(dist_in)
@@ -334,7 +343,7 @@ if __name__ == "__main__":
                 with open(object_name, "a") as f:
                     f.write(data)
         except Exception as e:
-            print("Error:" + str(e))
+            logging.info("Error:" + str(e))
 
         for each in thread_list:
             os.remove(each)
@@ -345,9 +354,8 @@ if __name__ == "__main__":
         try:
             mesh = trimesh.load_mesh(filename_in)
             dist = np.loadtxt(dist_in)
-        except Exception:
-            print(f"load {filename_in} or {dist_in} failed...")
-            continue
+        except Exception as e:
+            logging.info(f"load {filename_in} or {dist_in} failed with error: {e}")
 
         # delete the dist_in
         os.remove(dist_in)
@@ -373,7 +381,7 @@ if __name__ == "__main__":
             dist_idx=dist[:, :2].astype(np.uint16),
         )
 
-    print("\nThe npz data generation finished. Now generating filelist...\n")
+    logging.info("\nThe npz data generation finished. Now generating filelist...\n")
 
     train_lines = []
     for each in tqdm(train_objects):
@@ -389,8 +397,8 @@ if __name__ == "__main__":
                 train_lines.append(filename_out + "\n")
             else:
                 raise ValueError("File contains inf for the distances!")
-        except Exception:
-            raise ValueError("load " + filename_out + " failed...")
+        except Exception as e:
+            raise ValueError("load " + filename_out + " failed with error: " + str(e))
 
     test_lines = []
     for each in tqdm(test_objects):
@@ -406,8 +414,8 @@ if __name__ == "__main__":
                 test_lines.append(filename_out + "\n")
             else:
                 raise ValueError("File contains inf for the distances!")
-        except Exception:
-            raise ValueError("load " + filename_out + " failed...")
+        except Exception as e:
+            raise ValueError("load " + filename_out + " failed with error: " + str(e))
 
     with open(PATH_TO_OUTPUT_FILELIST + "filelist_train.txt", "w") as f:
         f.writelines(train_lines)
@@ -415,4 +423,4 @@ if __name__ == "__main__":
     with open(PATH_TO_OUTPUT_FILELIST + "filelist_test.txt", "w") as f:
         f.writelines(test_lines)
 
-    print("The filelist generation finished.")
+    logging.info("The filelist generation finished.")

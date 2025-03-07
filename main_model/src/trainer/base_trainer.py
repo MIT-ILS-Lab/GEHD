@@ -3,9 +3,12 @@ import time
 import random
 import numpy as np
 from tqdm import tqdm
+import wandb
+import logging
 
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from torch.optim import SGD, Adam, AdamW
 from torch.utils.tensorboard.writer import SummaryWriter
 from torch.utils.data import DataLoader
@@ -13,6 +16,8 @@ from torch.utils.data import DataLoader
 from main_model.src.utils.thsolver.sampler import InfSampler
 from main_model.src.utils.thsolver.tracker import AverageTracker
 from main_model.src.utils.thsolver.lr_scheduler import get_lr_scheduler
+
+logger = logging.getLogger(__name__)
 
 
 class Solver:
@@ -23,12 +28,29 @@ class Solver:
         self.disable_tqdm = not (is_master and self.config["solver"]["progress_bar"])
         self.start_epoch = 1
 
+        self.rank = dist.get_rank() if dist.is_initialized() else 0
+
+        if self.rank == 0:
+            wandb.init(
+                project=self.config["solver"]["wandb"]["project_name"],
+                name=self.config["solver"]["wandb"]["run_name"],
+                dir=self.config["solver"]["logdir"],
+                config=self.config,
+                mode="offline",
+            )
+
         self.model = None
         self.optimizer = None
         self.scheduler = None
         self.summary_writer = None
         self.log_file = None
         self.eval_rst = dict()
+
+        self.log_per_iter = self.config["solver"]["log_per_iter"]
+
+        self.accumulation_steps = self.config["solver"]["accumulation_steps"]
+
+        self.global_step = 0
 
     def get_model(self, config):
         raise NotImplementedError
@@ -86,7 +108,7 @@ class Solver:
         model = self.get_model(config)
         model.to(self.device)
         if self.is_master:
-            print(model)
+            logger.info(model)
         self.model = model
 
     def config_optimizer(self):
@@ -134,7 +156,13 @@ class Solver:
         elapsed_time = dict()
         train_tracker = AverageTracker()
         rng = range(len(self.train_loader))
-        log_per_iter = self.config["solver"]["log_per_iter"]
+
+        self.optimizer.zero_grad()  # zero grad at the start of accumulation
+
+        # if rng is 1, don't use tqdm
+        if len(rng) == 1:
+            self.disable_tqdm = True
+
         for it in tqdm(rng, ncols=80, leave=False, disable=self.disable_tqdm):
             # load data
             batch = self.train_iter.__next__()
@@ -148,17 +176,19 @@ class Solver:
             elapsed_time["time/data"] = torch.Tensor([time.time() - tick])
 
             # forward and backward
-            self.optimizer.zero_grad()
             output = self.train_step(batch)
-            output["train/loss"].backward()
+            loss = output["train/loss"] / self.accumulation_steps
+            loss.backward()
 
             # grad clip
             clip_grad = self.config["solver"]["clip_grad"]
             if clip_grad > 0:
                 nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
 
-            # apply the gradient
-            self.optimizer.step()
+            # apply the gradient every accumulation_steps
+            if (self.global_step + 1) % self.accumulation_steps == 0:
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
             # track the averaged tensors
             elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
@@ -173,12 +203,26 @@ class Solver:
             ):
                 torch.cuda.empty_cache()
 
-            if log_per_iter > 0 and it % log_per_iter == 0:
+            if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
                 train_tracker.log(
-                    epoch, msg_tag="- ", notes=f"iter: {it}", print_time=False
+                    epoch,
+                    msg_tag="- ",
+                    notes=f"iter: {self.global_step}",
+                    print_time=False,
                 )
 
             train_tracker.log(epoch, self.summary_writer)
+            self.global_step += 1
+
+            # Apply gradients if any remain after the loop finishes
+            if self.global_step % self.accumulation_steps != 0:
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
+        if self.rank == 0:
+            log_data = train_tracker.average()
+            log_data["lr"] = self.optimizer.param_groups[0]["lr"]
+            wandb.log(log_data, step=self.global_step)
 
     def test_epoch(self, epoch):
         self.model.eval()
@@ -191,9 +235,10 @@ class Solver:
             batch["iter_num"] = it
             batch["epoch"] = epoch
             output = self.test_step(batch)
+            loss = output["test/loss"]
             try:
                 test_err_distribution.append(
-                    batch["filename"][0] + " " + str(float(output["test/loss"]))
+                    batch["filename"][0] + " " + str(float(loss))
                 )
             except:
                 pass
@@ -201,6 +246,11 @@ class Solver:
             test_tracker.update(output)
 
         test_tracker.log(epoch, self.summary_writer, self.log_file, msg_tag="=>")
+
+        if self.rank == 0:
+            log_data = test_tracker.average()
+            wandb.log(log_data, step=self.global_step)
+
         self.result_callback(test_tracker, epoch)
         with open(self.logdir + "/err_statistic.txt", "w") as f:
             f.write(str(test_err_distribution))
@@ -231,7 +281,7 @@ class Solver:
             },
             ckpt_name + ".solver.tar",
         )
-        print(f"Checkpoint saved to {ckpt_name}")
+        logger.info(f"Checkpoint saved to {ckpt_name}")
 
     def load_checkpoint(self):
         ckpt = self.config["solver"]["ckpt"]
@@ -317,7 +367,7 @@ class Solver:
         version = torch.__version__.split(".")
         larger_than_110 = int(version[0]) > 0 and int(version[1]) > 10
         if not larger_than_110:
-            print("The profile function is only available for Pytorch>=1.10.0.")
+            logger.info("The profile function is only available for Pytorch>=1.10.0.")
             return
 
         # Warm-up phase to ensure initial profiling works well
@@ -347,13 +397,13 @@ class Solver:
                 output["train/loss"].backward()
                 prof.step()
 
-        # Print the profiling results, sorted by GPU time and memory usage
-        print(
+        # Log the profiling results, sorted by GPU time and memory usage
+        logger.info(
             prof.key_averages(group_by_input_shape=True, group_by_stack_n=10).table(
                 sort_by="cuda_time_total", row_limit=10
             )
         )
-        print(
+        logger.info(
             prof.key_averages(group_by_input_shape=True, group_by_stack_n=10).table(
                 sort_by="cuda_memory_usage", row_limit=10
             )

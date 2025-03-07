@@ -17,12 +17,20 @@ solver:
   lr_type: poly
   lr_power: 0.9
 
+  # gradient accumulation
+  accumulation_steps: 5 # gradient accumulation
+
   # others
   progress_bar: True
   rand_seed: -1 # fix the random seed if bigger than 0
   empty_cache: True # empty the cache periodically
   ckpt: "" # which checkpoint to load, None means no checkpoint
   clip_grad: -1.0  # clip gradient norm (-1: disable)
+
+  # wandb
+  wandb:
+    project_name: "encoder"
+    run_name: "my_encoder_run"
 
 data:
   preparation:
@@ -46,7 +54,7 @@ data:
     # data augmentations
     distort: True
     angle: [10, 10, 10]
-    scale: 0.1
+    scale: 0
     jitter: 0.1
 
     # data loading
@@ -64,7 +72,7 @@ data:
     # data augmentations
     distort: False
     angle: [10, 10, 10]
-    scale: 0.1
+    scale: 0
     jitter: 0.1
 
     # data loading
@@ -93,4 +101,3 @@ model:
   # visualization, will not affect the training/testing process, only visualization
   get_test_stat: False         # if true, evaluate the test set before visualization
   output_dir: main_model/out/
-
