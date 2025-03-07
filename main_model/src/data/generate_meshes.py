@@ -9,7 +9,7 @@ if __name__ == "__main__":
     config = load_config(args.config)
 
     # Define path to mesh directory
-    PATH_TO_MESH = config["DATA"]["preparation"]["path_to_mesh"]
+    PATH_TO_MESH = config["data"]["preparation"]["path_to_mesh"]
 
     # Ensure the directory exists
     os.makedirs(PATH_TO_MESH, exist_ok=True)
