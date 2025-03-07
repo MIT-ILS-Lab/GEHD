@@ -11,7 +11,7 @@ from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
 
 # a function that reads a triangular mesh, and generates its corresponding graph
-def read_mesh(path, to_tensor=True, device="cpu"):
+def read_mesh(path, to_tensor=True, device=torch.device("cpu")):
     mesh = trimesh.load(path)
     vertices = mesh.vertices
     edges = mesh.edges_unique
@@ -134,8 +134,8 @@ def main(config):
     args = parser.parse_args()
 
     if args.mode == "SSAD":
-        obj_dic = read_mesh(args.test_file)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        obj_dic = read_mesh(args.test_file, device=device)
         # print the vertex and face number
         print(
             "Vertex number: ",

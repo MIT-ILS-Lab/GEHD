@@ -152,7 +152,7 @@ class HGraph:
         assert smallest_grid * (2 ** (depth - 1)) <= 2
         assert depth >= 0
 
-        self.device = "cuda"
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.depth = depth
         self.batch_size = batch_size
         self.smallest_grid = smallest_grid
@@ -209,8 +209,8 @@ class HGraph:
             edges_attr = decide_edge_type_distance(edges, return_edge_length=False)
             new_graph.edge_attr = edges_attr
 
-            graphtree[i] = new_graph
-            cluster[i] = clst
+            graphtree[i] = new_graph.to(self.device)
+            cluster[i] = clst.to(self.device)
             edges_size[i] = new_graph.edge_index.shape[1]
             vertices_size[i] = new_graph.x.shape[0]
 
@@ -218,8 +218,6 @@ class HGraph:
         self.cluster = cluster
         self.vertices_sizes = vertices_size
         self.edges_sizes = edges_size
-
-        # self.export_obj()
 
     # @staticmethod
     def merge_hgraph(self, original_graphs: list[HGraph], debug_report=False):
@@ -263,10 +261,10 @@ class HGraph:
             )
             # construct new cluster
             if d != 0:
-                temp_clst = torch.cat(clusters, dim=0)
+                temp_clst = torch.cat(clusters, dim=0).to(self.device)
             else:
                 temp_clst = None
-            self.treedict[d] = temp_data
+            self.treedict[d] = temp_data.to(self.device)
             self.cluster[d] = temp_clst
             self.edges_sizes = temp_data.edge_index.shape[1]
             self.vertices_sizes = len(temp_data.x)
@@ -284,17 +282,3 @@ class HGraph:
                 print(
                     f"Before merge, at d={d} there's {num_edges_before} edges; {num_edges_after} afterwards"
                 )
-
-    #####################################################
-    # Util
-    #####################################################
-
-    def cuda(self):
-        # move all tensors to cuda
-        for each in self.treedict.keys():
-            self.treedict[each] = self.treedict[each].cuda()
-        for each in self.cluster.keys():
-            if self.cluster[each] is None:
-                continue
-            self.cluster[each] = self.cluster[each].cuda()
-        return self
