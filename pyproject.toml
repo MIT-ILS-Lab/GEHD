@@ -26,7 +26,6 @@ dependencies = [
     "torch-geometric",
     "torch-scatter",
     "wandb",
-    "logging"
 ]
 
 [tool.setuptools]

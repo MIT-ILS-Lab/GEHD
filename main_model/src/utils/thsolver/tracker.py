@@ -11,6 +11,10 @@ import torch.distributed
 from datetime import datetime
 from tqdm import tqdm
 from typing import Dict
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 class AverageTracker:
@@ -64,6 +68,11 @@ class AverageTracker:
             return  # empty, return
 
         avg = self.average()
+
+        if pbar:
+            pbar.set_postfix(ordered_dict=avg)
+            return
+
         msg = "Epoch: %d" % epoch
         for key, val in avg.items():
             msg += ", %s: %.3f" % (key, val)
@@ -100,7 +109,4 @@ class AverageTracker:
         chunks = [msg[i : i + self.max_len] for i in range(0, len(msg), self.max_len)]
         msg = (msg_tag + " ") + ("\n" + len(msg_tag) * " " + " ").join(chunks)
 
-        if pbar:
-            pbar.set_postfix(ordered_dict=avg)
-        else:
-            tqdm.write(msg)
+        logging.info(msg)

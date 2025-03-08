@@ -73,9 +73,6 @@ class Solver:
     def get_embd(self, batch):
         raise NotImplementedError
 
-    def result_callback(self, avg_tracker: AverageTracker, epoch):
-        pass  # additional operations based on the avg_tracker
-
     def config_dataloader(self, disable_train_data=False):
         config_train, config_test = (
             self.config["data"]["train"],
@@ -142,7 +139,7 @@ class Solver:
         self.log_file = os.path.join(self.logdir, "log.csv")
 
         if self.is_master:
-            tqdm.write("logdir: " + self.logdir)
+            logging.info("logdir: " + self.logdir)
 
         if self.is_master and set_writer:
             self.summary_writer = SummaryWriter(self.logdir, flush_secs=20)
@@ -163,7 +160,7 @@ class Solver:
         if len(rng) == 1:
             self.disable_tqdm = True
 
-        for it in tqdm(rng, ncols=80, leave=False, disable=self.disable_tqdm):
+        for it in tqdm(rng, leave=False, disable=self.disable_tqdm):
             # load data
             batch = self.train_iter.__next__()
             batch["iter_num"] = it
@@ -189,6 +186,8 @@ class Solver:
             if (self.global_step + 1) % self.accumulation_steps == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+                if self.accumulation_steps > 1:
+                    logging.info(f"Successfully ran accumulated gradient step at step {self.global_step}")
 
             # track the averaged tensors
             elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
@@ -255,10 +254,6 @@ class Solver:
             log_data = test_tracker.average()
             wandb.log(log_data, step=self.global_step)
 
-        self.result_callback(test_tracker, epoch)
-        with open(self.logdir + "/err_statistic.txt", "w") as f:
-            f.write(str(test_err_distribution))
-
     def eval_epoch(self, epoch):
         self.model.eval()
         eval_step = min(self.config["solver"]["eval_step"], len(self.test_loader))
@@ -285,7 +280,7 @@ class Solver:
             },
             ckpt_name + ".solver.tar",
         )
-        logger.info(f"Checkpoint saved to {ckpt_name}")
+        logging.info(f"Checkpoint saved to {ckpt_name}")
 
     def load_checkpoint(self):
         ckpt = self.config["solver"]["ckpt"]
@@ -324,7 +319,7 @@ class Solver:
         self.load_checkpoint()
 
         rng = range(self.start_epoch, self.config["solver"]["max_epoch"] + 1)
-        with tqdm(rng, ncols=80, disable=self.disable_tqdm) as pbar:
+        with tqdm(rng, disable=self.disable_tqdm) as pbar:
             for epoch in pbar:
                 # training epoch
                 self.train_epoch(epoch, pbar)

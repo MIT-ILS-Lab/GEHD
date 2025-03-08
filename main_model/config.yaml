@@ -3,7 +3,7 @@ solver:
 
   # logging and processing
   logdir: main_model/logs/encoder
-  max_epoch: 500
+  max_epoch: 16000
   test_every_epoch: 20
   save_every_epoch: 50
   log_per_iter: 10
@@ -18,7 +18,7 @@ solver:
   lr_power: 0.9
 
   # gradient accumulation
-  accumulation_steps: 5 # gradient accumulation
+  accumulation_steps: 32 # gradient accumulation
 
   # others
   progress_bar: True
@@ -62,7 +62,7 @@ data:
     filelist: main_model/disk/filelist/filelist_train.txt
     batch_size: 1
     shuffle: True
-    num_workers: 4
+    num_workers: 0
 
     # others
     disable: False # wether or not to disable the training set
@@ -80,7 +80,7 @@ data:
     filelist: main_model/disk/filelist/filelist_test.txt
     batch_size: 4
     shuffle: True
-    num_workers: 4
+    num_workers: 0
 
     # others
     disable: False # wether or not to disable the test set
