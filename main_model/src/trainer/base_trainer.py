@@ -142,14 +142,14 @@ class Solver:
         self.log_file = os.path.join(self.logdir, "log.csv")
 
         if self.is_master:
-            tqdm.write("Logdir: " + self.logdir)
+            tqdm.write("logdir: " + self.logdir)
 
         if self.is_master and set_writer:
             self.summary_writer = SummaryWriter(self.logdir, flush_secs=20)
             if not os.path.exists(self.ckpt_dir):
                 os.makedirs(self.ckpt_dir)
 
-    def train_epoch(self, epoch):
+    def train_epoch(self, epoch, pbar):
         self.model.train()
 
         tick = time.time()
@@ -209,9 +209,10 @@ class Solver:
                     msg_tag="- ",
                     notes=f"iter: {self.global_step}",
                     print_time=False,
+                    pbar=pbar,
                 )
 
-            train_tracker.log(epoch, self.summary_writer)
+            train_tracker.log(epoch, summary_writer=self.summary_writer, pbar=pbar)
             self.global_step += 1
 
             # Apply gradients if any remain after the loop finishes
@@ -224,11 +225,12 @@ class Solver:
             log_data["lr"] = self.optimizer.param_groups[0]["lr"]
             wandb.log(log_data, step=self.global_step)
 
-    def test_epoch(self, epoch):
+    def test_epoch(self, epoch, pbar):
         self.model.eval()
         test_tracker = AverageTracker()
         test_err_distribution = []
         rng = range(len(self.test_loader))
+
         for it in tqdm(rng, ncols=80, leave=False, disable=self.disable_tqdm):
             # forward
             batch = self.test_iter.__next__()
@@ -241,11 +243,13 @@ class Solver:
                     batch["filename"][0] + " " + str(float(loss))
                 )
             except:
-                pass
+                raise ValueError("The filename is not in the batch.")
             # track the averaged tensors
             test_tracker.update(output)
 
-        test_tracker.log(epoch, self.summary_writer, self.log_file, msg_tag="=>")
+        test_tracker.log(
+            epoch, self.summary_writer, self.log_file, msg_tag="=>", pbar=pbar
+        )
 
         if self.rank == 0:
             log_data = test_tracker.average()
@@ -320,22 +324,23 @@ class Solver:
         self.load_checkpoint()
 
         rng = range(self.start_epoch, self.config["solver"]["max_epoch"] + 1)
-        for epoch in tqdm(rng, ncols=80, disable=self.disable_tqdm):
-            # training epoch
-            self.train_epoch(epoch)
+        with tqdm(rng, ncols=80, disable=self.disable_tqdm) as pbar:
+            for epoch in pbar:
+                # training epoch
+                self.train_epoch(epoch, pbar)
 
-            # update learning rate
-            self.scheduler.step()
-            lr = self.scheduler.get_last_lr()
-            self.summary_writer.add_scalar("train/lr", lr[0], epoch)
+                # update learning rate
+                self.scheduler.step()
+                lr = self.scheduler.get_last_lr()
+                self.summary_writer.add_scalar("train/lr", lr[0], epoch)
 
-            # testing epoch
-            if epoch % self.config["solver"]["test_every_epoch"] == 0:
-                self.test_epoch(epoch)
+                # testing epoch
+                if epoch % self.config["solver"]["test_every_epoch"] == 0:
+                    self.test_epoch(epoch, pbar)
 
-            # checkpoint
-            if epoch % self.config["solver"]["save_every_epoch"] == 0:
-                self.save_checkpoint(epoch)
+                # checkpoint
+                if epoch % self.config["solver"]["save_every_epoch"] == 0:
+                    self.save_checkpoint(epoch)
 
     def test(self):
         self.manual_seed()

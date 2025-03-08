@@ -58,6 +58,7 @@ class AverageTracker:
         notes="",
         print_time=True,
         print_memory=False,
+        pbar=None,
     ):
         if not self.value:
             return  # empty, return
@@ -98,4 +99,8 @@ class AverageTracker:
         # split the msg for better display
         chunks = [msg[i : i + self.max_len] for i in range(0, len(msg), self.max_len)]
         msg = (msg_tag + " ") + ("\n" + len(msg_tag) * " " + " ").join(chunks)
-        tqdm.write(msg)
+
+        if pbar:
+            pbar.set_postfix(ordered_dict=avg)
+        else:
+            tqdm.write(msg)
