@@ -6,7 +6,7 @@ import argparse
 import os
 
 from main_model.src.utils.config import load_config, parse_args
-from main_model.src.utils.hgraph.models.graph_unet import GraphUNet
+from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
 

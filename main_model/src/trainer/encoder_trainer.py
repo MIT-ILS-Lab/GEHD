@@ -2,7 +2,7 @@ import torch
 import logging
 
 from main_model.src.trainer.base_trainer import Solver
-from main_model.src.utils.hgraph.models.graph_unet import GraphUNet
+from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.config import load_config, parse_args
 from main_model.src.data.encoder_dataloader import get_dataset
 
@@ -17,7 +17,7 @@ def get_parameter_number(model):
     return {"Total": total_num, "Trainable": trainable_num}
 
 
-class GeGnnSolver(Solver):
+class GeGnnTrainer(Solver):
     def __init__(self, config, is_master=True):
         super().__init__(config, is_master)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -106,5 +106,5 @@ if __name__ == "__main__":
     args = parse_args()
     config = load_config(args.config)
 
-    solver = GeGnnSolver(config)
+    solver = GeGnnTrainer(config)
     solver.run()

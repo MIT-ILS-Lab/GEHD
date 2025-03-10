@@ -17,7 +17,7 @@ def load_config(config_file):
     return config
 
 
-def parse_args():
+def parse_args(path="main_model/config.yaml"):
     """
     Parses command-line arguments.
 
@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument(
         "--config",
         type=str,
-        default="main_model/config.yaml",  # Default configuration file
+        default=path,  # Default configuration file
         help="Path to the YAML configuration file.",
     )
     return parser.parse_args()

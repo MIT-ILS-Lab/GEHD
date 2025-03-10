@@ -11,4 +11,5 @@ disk
 *.ini
 *.npy
 *.pyc
+*.jpg
 __pycache__

@@ -1,8 +1,8 @@
+# Path Config
 import logging
-import yaml
 
 from main_model.src.utils.config import load_config, parse_args
-from main_model.src.trainer.encoder_trainer import GeGnnTrainer
+from main_model.src.trainer.decoder_trainer import LEHDTrainer
 
 # Configure the logger
 logging.basicConfig(
@@ -15,14 +15,8 @@ logging.basicConfig(
 )
 
 if __name__ == "__main__":
-    # Load the config file
-    args = parse_args()
+    args = parse_args(path="main_model/config_decoder.yaml")
     config = load_config(args.config)
 
-    # Pretty-print the config using YAML formatting
-    logging.info(
-        f"Loaded configuration from {config}:\n{yaml.dump(config, default_flow_style=False, sort_keys=False)}"
-    )
-
-    solver = GeGnnTrainer(config)
-    solver.run()
+    trainer = LEHDTrainer(config["train"])
+    trainer.run()
