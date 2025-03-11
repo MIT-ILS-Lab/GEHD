@@ -8,7 +8,6 @@ class LEHD(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
-        self.mode = model_params["mode"]
         self.encoder = CVRP_Encoder(**model_params)
         self.decoder = CVRP_Decoder(**model_params)
 
@@ -21,6 +20,7 @@ class LEHD(nn.Module):
         solution,
         current_step,
         raw_data_capacity=None,
+        mode="train",
     ):
         # solution's shape : [B, V]
         self.capacity = raw_data_capacity.ravel()[0].item()
@@ -47,9 +47,9 @@ class LEHD(nn.Module):
             return (
                 selected_node_student_,
                 selected_flag_student_,
-            )  # node 的 index 从 1 开始
+            )
 
-        if self.mode == "train":
+        if mode == "train":
             remaining_capacity = problems[:, 1, 3]
 
             probs = self.decoder(
@@ -70,7 +70,6 @@ class LEHD(nn.Module):
             is_via_depot = selected_flag_teacher == 1
             selected_node_teacher_copy = selected_node_teacher - 1
             selected_node_teacher_copy[is_via_depot] += split_line
-            # print('selected_node_teacher after',selected_node_teacher)
             prob_select_node = probs[
                 torch.arange(batch_size)[:, None], selected_node_teacher_copy[:, None]
             ].reshape(
@@ -79,10 +78,9 @@ class LEHD(nn.Module):
 
             loss_node = -prob_select_node.type(torch.float64).log().mean()
 
-        if self.mode == "test":
-
+        if mode == "test":
             remaining_capacity = problems[:, 1, 3]
-            # print(problems.shape)
+
             if current_step <= 1:
                 self.encoded_nodes = self.encoder(problems, self.capacity)
 
@@ -94,11 +92,8 @@ class LEHD(nn.Module):
             )
 
             selected_node_student = probs.argmax(dim=1)  # shape: B
-            is_via_depot_student = (
-                selected_node_student >= split_line
-            )  # 节点index大于 customer_num的是通过depot的
+            is_via_depot_student = selected_node_student >= split_line
             not_via_depot_student = selected_node_student < split_line
-            # print(selected_node_student)
             selected_flag_student = torch.zeros(batch_size, dtype=torch.int)
             selected_flag_student[is_via_depot_student] = 1
             selected_node_student[is_via_depot_student] = (

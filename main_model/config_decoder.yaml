@@ -1,11 +1,5 @@
 train:
-  env_params:
-    data_path: "main_model/cvrp_data/vrp100_hgs_train_100w.txt"
-    mode: "train"
-    sub_path: True
-
   model_params:
-    mode: "train"
     embedding_dim: 128
     sqrt_embedding_dim: 11.313708498984761
     decoder_layer_num: 6
@@ -22,22 +16,25 @@ train:
 
   trainer_params:
     epochs: 5
-    train_episodes: 20
-    train_batch_size: 2
+    episodes: 20
+    batch_size: 2
     num_workers: 4
-    logging:
-      model_save_interval: 1
-      img_save_interval: 10000
-      log_image_params_1:
-        json_foldername: "log_image_style"
-        filename: "style_cvrp.json"
-      log_image_params_2:
-        json_foldername: "log_image_style"
-        filename: "style_loss.json"
+    env:
+      data_path: "main_model/cvrp_data/vrp100_hgs_train_100w.txt"
+      sub_path: True
     model_load:
       enable: false
       path: "./result/20230817_235537_train"
       epoch: 40
+
+  testing_params:
+    episodes: 10
+    batch_size: 10
+    num_workers: 4
+    test_interval: 1
+    env:
+      data_path: "main_model/cvrp_data/vrp100_test_lkh.txt"
+      sub_path: False
 
   logger_params:
     result_folder: "main_model/result/test"
