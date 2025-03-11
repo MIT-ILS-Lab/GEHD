@@ -8,9 +8,8 @@ from torch.utils.data import DataLoader
 from main_model.src.architecture.decoder_architecture import LEHD
 from main_model.src.data.decoder_dataloader import (
     LEHDDataset,
-    FixedLengthBatchSampler,
+    LEHDBatchSampler,
     vrp_collate_fn,
-    # fixed_length_vrp_collate_fn,
 )
 from main_model.src.utils.general_utils import *
 
@@ -45,15 +44,12 @@ class LEHDTrainer:
             device=self.device,
         )
 
-        # Use custom batch sampler instead of shuffle=True
+        # Use custom batch sampler
         dataset_size = len(self.dataset_train)
         problem_size = self.dataset_train.raw_data_nodes.shape[1] - 1
-        batch_sampler = FixedLengthBatchSampler(
+        batch_sampler = LEHDBatchSampler(
             dataset_size, problem_size, self.trainer_params["train_batch_size"]
         )
-
-        # Create a partial function for the collate_fn that includes the dataset
-        # collate_fn = partial(fixed_length_vrp_collate_fn, dataset=self.dataset_train)
 
         self.dataloader_train = DataLoader(
             self.dataset_train,

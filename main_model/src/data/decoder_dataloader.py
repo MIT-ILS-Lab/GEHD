@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 
 
-class FixedLengthBatchSampler(torch.utils.data.Sampler):
+class LEHDBatchSampler(torch.utils.data.Sampler):
     """
     BatchSampler that groups items into batches where each batch uses a fixed subpath length.
     This ensures all items in a batch have the same sequence length.
