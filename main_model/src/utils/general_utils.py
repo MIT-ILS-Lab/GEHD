@@ -6,68 +6,9 @@ import os
 import shutil
 import sys
 import time
-from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pytz
-
-process_start_time = datetime.now()
-b = os.path.abspath(".")
-desc = "train"
-result_folder = b + "/result/" + process_start_time.strftime("%Y%m%d_%H%M%S") + "{desc}"
-
-
-def get_result_folder():
-    return result_folder
-
-
-def set_result_folder(folder):
-    global result_folder
-    result_folder = folder
-
-
-def create_logger(log_file=None):
-    if "filepath" not in log_file:
-        log_file["filepath"] = get_result_folder()
-
-    if "desc" in log_file:
-        log_file["filepath"] = log_file["filepath"].format(desc="_" + log_file["desc"])
-    else:
-        log_file["filepath"] = log_file["filepath"].format(desc="")
-
-    set_result_folder(log_file["filepath"])
-
-    if "filename" in log_file:
-        filename = log_file["filepath"] + "/" + log_file["filename"]
-    else:
-        filename = log_file["filepath"] + "/" + "log.txt"
-
-    if not os.path.exists(log_file["filepath"]):
-        os.makedirs(log_file["filepath"])
-
-    file_mode = "a" if os.path.isfile(filename) else "w"
-
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level=logging.INFO)
-    formatter = logging.Formatter(
-        "[%(asctime)s] %(filename)s(%(lineno)d) : %(message)s", "%Y-%m-%d %H:%M:%S"
-    )
-
-    for hdlr in root_logger.handlers[:]:
-        root_logger.removeHandler(hdlr)
-
-    # write to file
-    fileout = logging.FileHandler(filename, mode=file_mode)
-    fileout.setLevel(logging.INFO)
-    fileout.setFormatter(formatter)
-    root_logger.addHandler(fileout)
-
-    # write to console
-    console = logging.StreamHandler(sys.stdout)
-    console.setLevel(logging.INFO)
-    console.setFormatter(formatter)
-    root_logger.addHandler(console)
 
 
 class AverageMeter:

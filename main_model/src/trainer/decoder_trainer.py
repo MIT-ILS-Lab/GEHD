@@ -1,19 +1,22 @@
 from logging import getLogger
-
 import torch
+from functools import partial
 from torch.optim import Adam as Optimizer
 from torch.optim.lr_scheduler import MultiStepLR as Scheduler
+from torch.utils.data import DataLoader
 
 from main_model.src.architecture.decoder_architecture import LEHD
-from main_model.src.data.decoder_datahandler import LEHDEnv
+from main_model.src.data.decoder_dataloader import (
+    LEHDDataset,
+    FixedLengthBatchSampler,
+    vrp_collate_fn,
+    # fixed_length_vrp_collate_fn,
+)
 from main_model.src.utils.general_utils import *
-
-# from CVRP.test import main_test
 
 
 class LEHDTrainer:
     def __init__(self, config):
-
         # save arguments
         self.env_params = config["env_params"]
         self.model_params = config["model_params"]
@@ -22,7 +25,7 @@ class LEHDTrainer:
 
         # result folder, logger
         self.logger = getLogger(name="trainer")
-        self.result_folder = get_result_folder()
+        self.result_folder = config["logger_params"]["result_folder"]
         self.result_log = LogData()
         random_seed = 22
         torch.manual_seed(random_seed)
@@ -32,7 +35,32 @@ class LEHDTrainer:
 
         # Main Components
         self.model = LEHD(**self.model_params)
-        self.env = LEHDEnv(self.device, **self.env_params)
+
+        # Create train dataset and dataloader
+        self.dataset_train = LEHDDataset(
+            data_path=self.env_params["data_path"],
+            episodes=self.trainer_params["train_episodes"],
+            mode=self.env_params["mode"],
+            sub_path=self.env_params["sub_path"],
+            device=self.device,
+        )
+
+        # Use custom batch sampler instead of shuffle=True
+        dataset_size = len(self.dataset_train)
+        problem_size = self.dataset_train.raw_data_nodes.shape[1] - 1
+        batch_sampler = FixedLengthBatchSampler(
+            dataset_size, problem_size, self.trainer_params["train_batch_size"]
+        )
+
+        # Create a partial function for the collate_fn that includes the dataset
+        # collate_fn = partial(fixed_length_vrp_collate_fn, dataset=self.dataset_train)
+
+        self.dataloader_train = DataLoader(
+            self.dataset_train,
+            batch_sampler=batch_sampler,
+            collate_fn=vrp_collate_fn,
+            num_workers=self.trainer_params["num_workers"],
+        )
 
         self.optimizer = Optimizer(
             self.model.parameters(), **self.optimizer_params["optimizer"]
@@ -59,25 +87,22 @@ class LEHDTrainer:
     def run(self):
         self.time_estimator.reset(self.start_epoch)
 
-        self.env.load_raw_data(self.trainer_params["train_episodes"])
-
         save_gap = []
         for epoch in range(self.start_epoch, self.trainer_params["epochs"] + 1):
             self.logger.info(
                 "================================================================="
             )
-            self.env.shuffle_data()
+
             # Train
             train_score, train_student_score, train_loss = self._train_one_epoch(epoch)
             self.result_log.append("train_score", epoch, train_score)
             self.result_log.append("train_student_score", epoch, train_student_score)
             self.result_log.append("train_loss", epoch, train_loss)
+
             # LR Decay
             self.scheduler.step()
 
-            ############################
             # Logs & Checkpoint
-            ############################
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(
                 epoch, self.trainer_params["epochs"]
             )
@@ -110,23 +135,6 @@ class LEHDTrainer:
                     labels=["train_loss"],
                 )
 
-            # if all_done or (epoch % model_save_interval) == 0:
-            #     self.logger.info("Saving trained_model")
-            #     checkpoint_dict = {
-            #         'epoch': epoch,
-            #         'model_state_dict': self.model.state_dict(),
-            #         'optimizer_state_dict': self.optimizer.state_dict(),
-            #         'scheduler_state_dict': self.scheduler.state_dict(),
-            #         'result_log': self.result_log.get_raw_data()
-            #     }
-            #     torch.save(checkpoint_dict, '{}/checkpoint-{}.pt'.format(self.result_folder, epoch))
-
-            #     score_optimal, score_student ,gap = main_test(epoch,self.result_folder, use_RRC = False,
-            #                                                   cuda_device_num=self.trainer_params['cuda_device_num'])
-
-            #     save_gap.append([score_optimal, score_student,gap])
-            #     np.savetxt(self.result_folder+'/gap.txt',save_gap,delimiter=',',fmt='%s')
-
             if all_done or (epoch % img_save_interval) == 0:
                 image_prefix = "{}/img/checkpoint-{}".format(self.result_folder, epoch)
                 util_save_log_image_with_label(
@@ -148,37 +156,39 @@ class LEHDTrainer:
                 util_print_log_array(self.logger, self.result_log)
 
     def _train_one_epoch(self, epoch):
-
         score_AM = AverageMeter()
         score_student_AM = AverageMeter()
         loss_AM = AverageMeter()
 
-        train_num_episode = self.trainer_params["train_episodes"]  # 100000
-        episode = 0
-        loop_cnt = 0
-        while episode < train_num_episode:
+        self.model.train()
 
-            remaining = train_num_episode - episode
-            batch_size = min(self.trainer_params["train_batch_size"], remaining)
+        total_batches = len(self.dataloader_train)
+        processed_batches = 0
 
+        for batch_data in self.dataloader_train:
+            problems = batch_data["problems"].to(self.device)
+            solutions = batch_data["solutions"].to(self.device)
+            capacities = batch_data["capacities"].to(self.device).float()
+
+            batch_size = problems.size(0)
+
+            # Process the batch
             avg_score, score_student_mean, avg_loss = self._train_one_batch(
-                episode, batch_size, epoch
+                problems, solutions, capacities, epoch
             )
 
             score_AM.update(avg_score, batch_size)
             score_student_AM.update(score_student_mean, batch_size)
             loss_AM.update(avg_loss, batch_size)
 
-            episode += batch_size
+            processed_batches += 1
 
-            loop_cnt += 1
-            # if loop_cnt <= 10:
             self.logger.info(
-                "Epoch {:3d}: Train {:3d}/{:3d}({:1.1f}%)  Score: {:.4f}, Score_studetnt: {:.4f},  Loss: {:.4f}".format(
+                "Epoch {:3d}: Train {:3d}/{:3d}({:1.1f}%)  Score: {:.4f}, Score_student: {:.4f},  Loss: {:.4f}".format(
                     epoch,
-                    episode,
-                    train_num_episode,
-                    100.0 * episode / train_num_episode,
+                    processed_batches,
+                    total_batches,
+                    100.0 * processed_batches / total_batches,
                     score_AM.avg,
                     score_student_AM.avg,
                     loss_AM.avg,
@@ -187,9 +197,8 @@ class LEHDTrainer:
 
         # Log once, for each epoch
         self.logger.info(
-            "Epoch {:3d}: Train ({:3.0f}%)  Score: {:.4f}, Score_studetnt: {:.4f}, Loss: {:.4f}".format(
+            "Epoch {:3d}: Train (100.0%)  Score: {:.4f}, Score_student: {:.4f}, Loss: {:.4f}".format(
                 epoch,
-                100.0 * episode / train_num_episode,
                 score_AM.avg,
                 score_student_AM.avg,
                 loss_AM.avg,
@@ -198,30 +207,42 @@ class LEHDTrainer:
 
         return score_AM.avg, score_student_AM.avg, loss_AM.avg
 
-    def _train_one_batch(self, episode, batch_size, epoch):
+    def _train_one_batch(self, problems, solutions, capacities, epoch):
+        # Initialize state tracking
+        batch_size = problems.size(0)
+        problem_size = problems.size(1) - 1  # Excluding depot
 
-        self.model.train()  # train状态
+        # Initialize selected node lists and flags
+        selected_node_list = torch.zeros(
+            (batch_size, 0), dtype=torch.long, device=self.device
+        )
+        selected_teacher_flag = torch.zeros(
+            (batch_size, 0), dtype=torch.long, device=self.device
+        )
+        selected_student_list = torch.zeros(
+            (batch_size, 0), dtype=torch.long, device=self.device
+        )
+        selected_student_flag = torch.zeros(
+            (batch_size, 0), dtype=torch.long, device=self.device
+        )
 
-        self.env.load_problems(episode, batch_size)  # 重新生成 problems
-
-        reset_state, _, _ = self.env.reset(self.env_params["mode"])
+        # Track current capacity
+        current_capacity = capacities.clone()
 
         loss_list = []
-
-        state, reward, reward_student, done = self.env.pre_step()
-
         current_step = 0
 
-        while not done:
+        # Training loop for constructing solution
+        while current_step < problem_size:
             if current_step == 0:
-                # print('current_step', current_step)
-                selected_teacher = self.env.solution[:, 0, 0]
-                selected_flag_teacher = self.env.solution[:, 0, 1]
-                selected_student = selected_teacher
-                selected_flag_student = selected_flag_teacher
-                loss_mean = torch.tensor(0)
+                # First step - use teacher's first selection
+                selected_teacher = solutions[:, 0, 0]
+                selected_flag_teacher = solutions[:, 0, 1]
+                selected_student = selected_teacher.clone()
+                selected_flag_student = selected_flag_teacher.clone()
+                loss_mean = torch.tensor(0, device=self.device)
             else:
-
+                # Use model to predict next node
                 (
                     loss_node,
                     selected_teacher,
@@ -229,30 +250,58 @@ class LEHDTrainer:
                     selected_flag_teacher,
                     selected_flag_student,
                 ) = self.model(
-                    state,
-                    self.env.selected_node_list,
-                    self.env.solution,
+                    problems,
+                    selected_node_list,
+                    solutions,
                     current_step,
-                    raw_data_capacity=self.env.raw_data_capacity,
+                    raw_data_capacity=capacities,
                 )
 
                 loss_mean = loss_node
 
+                # Backpropagation
                 self.model.zero_grad()
                 loss_mean.backward()
-
                 self.optimizer.step()
 
-            current_step += 1
-            state, reward, reward_student, done = self.env.step(
-                selected_teacher,
-                selected_student,
-                selected_flag_teacher,
-                selected_flag_student,
-            )  # 更新 selected_teacher list 和 mask
+            # Update capacity based on selection
+            # Handle depot returns (capacity refill)
+            is_depot = selected_flag_teacher == 1
+            current_capacity[is_depot] = capacities[is_depot]
 
+            # Get demands of selected nodes
+            selected_demands = torch.gather(
+                problems[:, :, 2], 1, selected_teacher.unsqueeze(1)
+            ).squeeze(1)
+
+            # Check if capacity is less than demand, refill if needed
+            smaller_ = current_capacity < selected_demands
+            selected_flag_teacher[smaller_] = 1
+            current_capacity[smaller_] = capacities[smaller_]
+
+            # Subtract demand from capacity
+            current_capacity = current_capacity - selected_demands
+
+            # Update tracking lists
+            selected_node_list = torch.cat(
+                (selected_node_list, selected_teacher.unsqueeze(1)), dim=1
+            )
+            selected_teacher_flag = torch.cat(
+                (selected_teacher_flag, selected_flag_teacher.unsqueeze(1)), dim=1
+            )
+            selected_student_list = torch.cat(
+                (selected_student_list, selected_student.unsqueeze(1)), dim=1
+            )
+            selected_student_flag = torch.cat(
+                (selected_student_flag, selected_flag_student.unsqueeze(1)), dim=1
+            )
+
+            current_step += 1
             loss_list.append(loss_mean)
 
-        loss_mean = torch.tensor(loss_list).mean()
+        # Calculate final loss
+        loss_mean = torch.stack(loss_list).mean()
 
+        # Calculate final scores (would implement cal_length method here)
+        # For now returning placeholder values
         return 0, 0, loss_mean.item()

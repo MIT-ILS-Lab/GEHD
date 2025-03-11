@@ -16,7 +16,7 @@ class LEHD(nn.Module):
 
     def forward(
         self,
-        state,
+        problems,
         selected_node_list,
         solution,
         current_step,
@@ -24,8 +24,8 @@ class LEHD(nn.Module):
     ):
         # solution's shape : [B, V]
         self.capacity = raw_data_capacity.ravel()[0].item()
-        batch_size = state.problems.shape[0]
-        problem_size = state.problems.shape[1]
+        batch_size = problems.shape[0]
+        problem_size = problems.shape[1]
         split_line = problem_size - 1
 
         def probs_to_selected_nodes(probs_, split_line_, batch_size_):
@@ -50,10 +50,10 @@ class LEHD(nn.Module):
             )  # node 的 index 从 1 开始
 
         if self.mode == "train":
-            remaining_capacity = state.problems[:, 1, 3]
+            remaining_capacity = problems[:, 1, 3]
 
             probs = self.decoder(
-                self.encoder(state.problems, self.capacity),
+                self.encoder(problems, self.capacity),
                 selected_node_list,
                 self.capacity,
                 remaining_capacity,
@@ -81,10 +81,10 @@ class LEHD(nn.Module):
 
         if self.mode == "test":
 
-            remaining_capacity = state.problems[:, 1, 3]
-            # print(state.problems.shape)
+            remaining_capacity = problems[:, 1, 3]
+            # print(problems.shape)
             if current_step <= 1:
-                self.encoded_nodes = self.encoder(state.problems, self.capacity)
+                self.encoded_nodes = self.encoder(problems, self.capacity)
 
             probs = self.decoder(
                 self.encoded_nodes,
