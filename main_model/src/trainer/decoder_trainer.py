@@ -1,5 +1,9 @@
-from logging import getLogger
 import torch
+import wandb
+from tqdm import tqdm
+from logging import getLogger
+
+import torch.distributed as dist
 from torch.optim import Adam as Optimizer
 from torch.optim.lr_scheduler import MultiStepLR as Scheduler
 from torch.utils.data import DataLoader
@@ -16,20 +20,35 @@ from main_model.src.utils.general_utils import *
 class LEHDTrainer:
     def __init__(self, config):
         # save arguments
+        self.global_step = 0
+
         self.model_params = config["model_params"]
         self.optimizer_params = config["optimizer_params"]
         self.trainer_params = config["trainer_params"]
         self.testing_params = config["testing_params"]
+        self.wandb_params = config["wandb_params"]
 
         # result folder, logger
         self.logger = getLogger(name="trainer")
         self.result_folder = config["logger_params"]["result_folder"]
         self.result_log = LogData()
+
         random_seed = 22
         torch.manual_seed(random_seed)
 
         # device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.rank = dist.get_rank() if dist.is_initialized() else 0
+
+        if self.rank == 0:
+            wandb.init(
+                project=self.wandb_params["project_name"],
+                name=self.wandb_params["run_name"],
+                dir=self.result_folder,
+                config=config,
+                mode="offline",
+            )
 
         # Main Components
         self.model = LEHD(**self.model_params)
@@ -108,56 +127,87 @@ class LEHDTrainer:
         self.time_estimator.reset(self.start_epoch)
 
         save_gap = []
-        for epoch in range(self.start_epoch, self.trainer_params["epochs"] + 1):
-            self.logger.info(
-                "================================================================="
-            )
+        epochs_range = range(self.start_epoch, self.trainer_params["epochs"] + 1)
+        with tqdm(epochs_range) as pbar:
+            for epoch in pbar:
+                # Train
+                train_loss = self.train_epoch(epoch, pbar)
+                self.result_log.append("train_loss", epoch, train_loss)
 
-            # Train
-            train_loss = self._train_one_epoch(epoch)
-            self.result_log.append("train_loss", epoch, train_loss)
+                # LR Decay
+                self.scheduler.step()
+                current_lr = self.scheduler.get_last_lr()[0]
 
-            # LR Decay
-            self.scheduler.step()
+                wandb.log({"train/lr": current_lr, "epoch": epoch})
 
-            # Logs & Checkpoint
-            elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(
-                epoch, self.trainer_params["epochs"]
-            )
-            self.logger.info(
-                "Epoch {:3d}/{:3d}: Time Est.: Elapsed[{}], Remain[{}]".format(
-                    epoch,
-                    self.trainer_params["epochs"],
-                    elapsed_time_str,
-                    remain_time_str,
+                # Logs & Checkpoint
+                elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(
+                    epoch, self.trainer_params["epochs"]
                 )
-            )
-
-            all_done = epoch == self.trainer_params["epochs"]
-
-            # Testing
-            if all_done or (epoch % self.testing_params["test_interval"] == 0):
-                logging.info("Running model testing")
-                test_score, test_student_score, test_gap = self._test_one_epoch(epoch)
-
-                # Run testing
-                test_score, test_student_score, test_gap = self._test_one_epoch(epoch)
-
-                # Log test results
-                self.result_log.append("test_score", epoch, test_score)
-                self.result_log.append("test_student_score", epoch, test_student_score)
-                self.result_log.append("test_gap", epoch, test_gap)
-
-                # Save test results
-                save_gap.append([test_score, test_student_score, test_gap])
-                np.savetxt(
-                    self.result_folder + "/gap.txt", save_gap, delimiter=",", fmt="%s"
+                self.logger.info(
+                    f"Epoch {epoch:3d}/{self.trainer_params['epochs']:3d}: Time Est.: Elapsed[{elapsed_time_str}], Remain[{remain_time_str}]"
                 )
 
-            if all_done:
-                self.logger.info(" *** Training Done *** ")
-                self.logger.info("Now, printing log array...")
-                util_print_log_array(self.logger, self.result_log)
+                all_done = epoch == self.trainer_params["epochs"]
+
+                # Testing
+                if all_done or (epoch % self.testing_params["test_interval"] == 0):
+                    test_score, test_student_score, test_gap = self.test_epoch(epoch)
+
+                    # Log test results
+                    self.result_log.append("test_score", epoch, test_score)
+                    self.result_log.append(
+                        "test_student_score", epoch, test_student_score
+                    )
+                    self.result_log.append("test_gap", epoch, test_gap)
+
+                    # Log to wandb
+                    wandb.log(
+                        {
+                            "test/optimal_score": test_score,
+                            "test/student_score": test_student_score,
+                            "test/gap_percentage": test_gap,
+                            "epoch": epoch,
+                        }
+                    )
+
+                    # Save test results
+                    save_gap.append([test_score, test_student_score, test_gap])
+                    np.savetxt(
+                        self.result_folder + "/gap.txt",
+                        save_gap,
+                        delimiter=",",
+                        fmt="%s",
+                    )
+
+                # Save checkpoint
+                if all_done or (epoch % self.trainer_params["save_interval"] == 0):
+                    self._save_checkpoint(epoch)
+
+                if all_done:
+                    self.logger.info(" *** Training Done *** ")
+                    self.logger.info("Now, printing log array...")
+                    util_print_log_array(self.logger, self.result_log)
+                    wandb.finish()
+
+    def _save_checkpoint(self, epoch):
+        checkpoint_path = f"{self.result_folder}/checkpoint-{epoch}.pt"
+
+        # Create checkpoint dictionary
+        checkpoint = {
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": self.scheduler.state_dict(),
+            "epoch": epoch,
+            "result_log": self.result_log.get_raw_data(),
+        }
+
+        # Save checkpoint
+        torch.save(checkpoint, checkpoint_path)
+        self.logger.info(f"Checkpoint saved to {checkpoint_path}")
+
+        # Log to wandb
+        wandb.save(checkpoint_path)
 
     def _get_travel_distance(self, problems_, solution_):
         """
@@ -221,15 +271,11 @@ class LEHDTrainer:
 
         return total_distance
 
-    def _train_one_epoch(self, epoch):
+    def train_epoch(self, epoch, pbar):
         loss_AM = AverageMeter()
-
         self.model.train()
 
-        total_batches = len(self.dataloader_train)
-        processed_batches = 0
-
-        for batch_data in self.dataloader_train:
+        for batch_data in tqdm(self.dataloader_train):
             problems = batch_data["problems"].to(self.device)
             solutions = batch_data["solutions"].to(self.device)
             capacities = batch_data["capacities"].to(self.device).float()
@@ -237,33 +283,21 @@ class LEHDTrainer:
             batch_size = problems.size(0)
 
             # Process the batch
-            avg_loss = self._train_one_batch(problems, solutions, capacities)
-
+            avg_loss = self.train_step(problems, solutions, capacities)
             loss_AM.update(avg_loss, batch_size)
 
-            processed_batches += 1
+            wandb.log({"train/loss": avg_loss}, step=self.global_step)
 
-            self.logger.info(
-                "Epoch {:3d}: Train {:3d}/{:3d}({:1.1f}%)  Loss: {:.4f}".format(
-                    epoch,
-                    processed_batches,
-                    total_batches,
-                    100.0 * processed_batches / total_batches,
-                    loss_AM.avg,
-                )
-            )
+            pbar.set_postfix({"train_loss": f"{loss_AM.avg:.4f}"})
 
-        # Log once, for each epoch
-        self.logger.info(
-            "Epoch {:3d}: Train (100.0%)  Loss: {:.4f}".format(
-                epoch,
-                loss_AM.avg,
-            )
-        )
+            self.global_step += 1
+
+        # Log final epoch stats
+        self.logger.info(f"Epoch {epoch:3d}: Train (100.0%)  Loss: {loss_AM.avg:.4f}")
 
         return loss_AM.avg
 
-    def _train_one_batch(self, problems, solutions, capacities):
+    def train_step(self, problems, solutions, capacities):
         # Initialize state tracking
         batch_size = problems.size(0)
         problem_size = problems.size(1) - 1  # Excluding depot
@@ -363,7 +397,7 @@ class LEHDTrainer:
         # For now returning placeholder values
         return loss_mean.item()
 
-    def _test_one_epoch(self, epoch):
+    def test_epoch(self, epoch, pbar):
         score_AM = AverageMeter()
         score_student_AM = AverageMeter()
         gap_AM = AverageMeter()
@@ -371,9 +405,6 @@ class LEHDTrainer:
         self.model.eval()
 
         with torch.no_grad():
-            total_batches = len(self.dataloader_test)
-            processed_batches = 0
-
             for batch_data in self.dataloader_test:
                 problems = batch_data["problems"].to(self.device)
                 solutions = batch_data["solutions"].to(self.device)
@@ -382,7 +413,7 @@ class LEHDTrainer:
                 batch_size = problems.size(0)
 
                 # Process the batch
-                avg_score, score_student_mean = self._test_one_batch(
+                avg_score, score_student_mean = self.test_step(
                     problems, solutions, capacities
                 )
 
@@ -393,35 +424,17 @@ class LEHDTrainer:
                 score_student_AM.update(score_student_mean, batch_size)
                 gap_AM.update(gap, batch_size)
 
-                processed_batches += 1
+                pbar.set_postfix({"test_gap": f"{gap_AM.avg:.2f}%"})
 
-                self.logger.info(
-                    "Epoch {:3d}: Test {:3d}/{:3d}({:1.1f}%)  Optimal: {:.4f}, Student: {:.4f}, Gap: {:.4f}%".format(
-                        epoch,
-                        processed_batches,
-                        total_batches,
-                        100.0 * processed_batches / total_batches,
-                        score_AM.avg,
-                        score_student_AM.avg,
-                        gap_AM.avg,
-                    )
-                )
-
-            # Log once, for each epoch
+            # Log final test stats
             self.logger.info(
-                "Epoch {:3d}: Test (100.0%)  Optimal: {:.4f}, Student: {:.4f}, Gap: {:.4f}%".format(
-                    epoch,
-                    score_AM.avg,
-                    score_student_AM.avg,
-                    gap_AM.avg,
-                )
+                f"Epoch {epoch:3d}: Test (100.0%)  Optimal: {score_AM.avg:.4f}, Student: {score_student_AM.avg:.4f}, Gap: {gap_AM.avg:.4f}%"
             )
 
         self.model.train()
-
         return score_AM.avg, score_student_AM.avg, gap_AM.avg
 
-    def _test_one_batch(self, problems, solutions, capacities):
+    def test_step(self, problems, solutions, capacities):
         # Initialize state tracking
         batch_size = problems.size(0)
         problem_size = problems.size(1) - 1  # Excluding depot

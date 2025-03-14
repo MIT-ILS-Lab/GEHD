@@ -21,7 +21,7 @@ if __name__ == "__main__":
     trainer = LEHDTrainer(config["train"])
     trainer.run()
 
-# TODO: Add dataloader option for testing and add it to here
-#       Add proper logging and wandb, get rid of other logging methods
+# TODO:
+#       Add proper logging and wandb, get rid of other logging methods -- check with base trainer
 #       Add data generation for mesh data for a sphere,
 #       Look into CVRPlib

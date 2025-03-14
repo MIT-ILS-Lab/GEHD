@@ -12,4 +12,7 @@ disk
 *.npy
 *.pyc
 *.jpg
+*.pt
+*.json
+*.wandb
 __pycache__

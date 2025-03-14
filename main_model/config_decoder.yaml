@@ -19,6 +19,7 @@ train:
     episodes: 20
     batch_size: 2
     num_workers: 4
+    save_interval: 2
     env:
       data_path: "main_model/cvrp_data/vrp100_hgs_train_100w.txt"
       sub_path: True
@@ -41,3 +42,7 @@ train:
     log_file:
       desc: "train"
       filename: "log.txt"
+
+  wandb_params:
+    project_name: "decoder"
+    run_name: "my_decoder_run"
