@@ -13,9 +13,9 @@ from torch.optim import SGD, Adam, AdamW
 from torch.utils.tensorboard.writer import SummaryWriter
 from torch.utils.data import DataLoader
 
-from main_model.src.utils.thsolver.sampler import InfSampler
-from main_model.src.utils.thsolver.tracker import AverageTracker
-from main_model.src.utils.thsolver.lr_scheduler import get_lr_scheduler
+from main_model.src.utils.sampler import InfSampler
+from main_model.src.utils.tracker import AverageTracker
+from main_model.src.utils.lr_scheduler import get_lr_scheduler
 
 logger = logging.getLogger(__name__)
 
