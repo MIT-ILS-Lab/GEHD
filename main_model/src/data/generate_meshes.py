@@ -5,7 +5,7 @@ from main_model.src.utils.config import load_config, parse_args
 
 if __name__ == "__main__":
     # initialize global settings
-    args = parse_args()
+    args = parse_args("main_model/configs/config_encoder.yaml")
     config = load_config(args.config)
 
     # Define path to mesh directory

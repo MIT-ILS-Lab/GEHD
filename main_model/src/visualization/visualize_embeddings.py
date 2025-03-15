@@ -193,7 +193,7 @@ def main(config):
 
 if __name__ == "__main__":
     # Load the config file
-    args = parse_args()
+    args = parse_args("main_model/configs/config_encoder.yaml")
     config = load_config(args.config)
 
     # Run main function

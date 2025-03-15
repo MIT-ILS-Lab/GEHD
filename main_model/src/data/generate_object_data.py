@@ -163,7 +163,7 @@ if __name__ == "__main__":
         threads: int, number of threads. 0 uses all cores
     """
     # Load the config file
-    args = parse_args()
+    args = parse_args("main_model/configs/config_encoder.yaml")
     config = load_config(args.config)
 
     # Initialize paths

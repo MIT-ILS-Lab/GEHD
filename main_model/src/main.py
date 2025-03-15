@@ -15,18 +15,24 @@ logging.basicConfig(
     ],
 )
 
+# Define the models
+models = {"encoder": GeGnnTrainer, "decoder": LEHDTrainer}
+paths = {
+    "encoder": "main_model/configs/config_encoder.yaml",
+    "decoder": "main_model/configs/config_decoder.yaml",
+}
 
-TYPE = "decoder"  # Set to "encoder" or "decoder"
+# Set the type of model to run, either "encoder" or "decoder"
+TYPE = "decoder"
 
 if __name__ == "__main__":
-    if TYPE == "encoder":
-        # Load the encoder config file
-        path = "main_model/configs/config_encoder.yaml"
-    elif TYPE == "decoder":
-        # Load the decoder config file
-        path = "main_model/configs/config_decoder.yaml"
-    else:
-        raise ValueError("Unknown type, please select either 'encoder' or 'decoder'.")
+    assert (
+        TYPE in models.keys()
+    ), f"Invalid model type: {TYPE}. Must be one of {models.keys()}"
+
+    # Select the model to run
+    model = models[TYPE]
+    path = paths[TYPE]
 
     logging.info(f"Running {TYPE} training.")
 
@@ -39,13 +45,6 @@ if __name__ == "__main__":
         f"Loaded configuration from {config}:\n{yaml.dump(config, default_flow_style=False, sort_keys=False)}"
     )
 
-    if TYPE == "encoder":
-        # Initialize the encoder trainer
-        solver = GeGnnTrainer(config)
-    elif TYPE == "decoder":
-        # Initialize the decoder trainer
-        solver = LEHDTrainer(config)
-    else:
-        raise ValueError("Unknown type, please select either 'encoder' or 'decoder'.")
+    solver = model(config)
 
     solver.run()
