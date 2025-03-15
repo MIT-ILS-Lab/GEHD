@@ -20,10 +20,10 @@ TYPE = "decoder"  # Set to "encoder" or "decoder"
 
 if __name__ == "__main__":
     if TYPE == "encoder":
-        # Load the config file
+        # Load the encoder config file
         path = "main_model/configs/config_encoder.yaml"
     elif TYPE == "decoder":
-        # Load the config file
+        # Load the decoder config file
         path = "main_model/configs/config_decoder.yaml"
     else:
         raise ValueError("Unknown type, please select either 'encoder' or 'decoder'.")

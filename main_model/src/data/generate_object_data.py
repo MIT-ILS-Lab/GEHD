@@ -224,10 +224,11 @@ if __name__ == "__main__":
     for i in tqdm(range(len(train_objects)), "Processing the training set"):
         object_name = train_objects[i]
         if object_name.split("/")[-1][0] == ".":
-            continue  # not an obj file
+            raise ValueError("Not an obj file")
 
         filename_out = PATH_TO_OUTPUT_NPZ + object_name + ".npz"
         if os.path.exists(filename_out):
+            print(f"File already exists, skipping {object_name}...")
             continue
 
         filename = object_name + ".obj"

@@ -100,11 +100,42 @@ class GeGnnTrainer(Solver):
 
         return loss
 
+    def get_visualization_data(self):
+        """helper function of visualization.
+            return a dict, containing the following components:
+              'filename': the name of the obj file to load
+              'dist_func': a function: (i, j, embd) => int
+              'embedding': embedding of vertices
+            the dict will be used in interactive.py.
+        Returns:
+            a dict
+        """
+        # helper function, a utility for the visualization
+        self.manual_seed()
+        self.config_model()
+        self.configure_log(set_writer=False)
+        self.config_dataloader(disable_train_data=True)
+        self.load_checkpoint()
 
-if __name__ == "__main__":
-    # Load the config file
-    args = parse_args()
-    config = load_config(args.config)
+        self.model.eval()
 
-    solver = GeGnnTrainer(config)
-    solver.run()
+        for it in tqdm(range(1), ncols=80, leave=False):
+            batch = self.test_iter.__next__()
+            with torch.no_grad():
+                embedding = self.get_embd(batch)
+
+        if self.config["model"]["get_test_stat"]:
+            self.test_epoch(499)
+
+        mesh_file = self.config["model"]["mesh_file"]
+        if mesh_file == None:
+            filename = batch["filename"][0]
+        else:
+            filename = mesh_file
+
+        # specially designed for geodesic dist task. may not operate correctly on other tasks
+        return {
+            "filename": filename,
+            "dist_func": self.embd_decoder_func,
+            "embedding": embedding,
+        }

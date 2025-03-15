@@ -128,7 +128,9 @@ class Solver:
                 parameters, lr=config["lr"], weight_decay=config["weight_decay"]
             )
         else:
-            raise ValueError
+            raise ValueError(
+                "Unknown optimizer type, only support 'sgd', 'adam' and 'adamw'"
+            )
 
     def config_lr_scheduler(self):
         self.scheduler = get_lr_scheduler(self.optimizer, self.config["solver"])
@@ -238,13 +240,7 @@ class Solver:
             batch["iter_num"] = it
             batch["epoch"] = epoch
             output = self.test_step(batch)
-            loss = output["test/loss"]
-            # try:
-            #     test_err_distribution.append(
-            #         batch["filename"][0] + " " + str(float(loss))
-            #     )
-            # except:
-            #     raise ValueError("The filename is not in the batch.")
+
             # track the averaged tensors
             test_tracker.update(output)
 
@@ -413,54 +409,3 @@ class Solver:
 
     def run(self):
         eval("self.%s()" % self.config["solver"]["run"])
-
-    @classmethod
-    def update_configs(cls):
-        pass
-
-    @classmethod
-    def worker(cls, config):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        solver = cls(config, is_master=True)
-        solver.device = device
-        solver.run()
-
-    def get_visualization_data(self):
-        """helper function of visualization.
-            return a dict, containing the following components:
-              'filename': the name of the obj file to load
-              'dist_func': a function: (i, j, embd) => int
-              'embedding': embedding of vertices
-            the dict will be used in interactive.py.
-        Returns:
-            a dict
-        """
-        # helper function, a utility for the visualization
-        self.manual_seed()
-        self.config_model()
-        self.configure_log(set_writer=False)
-        self.config_dataloader(disable_train_data=True)
-        self.load_checkpoint()
-
-        self.model.eval()
-
-        for it in tqdm(range(1), ncols=80, leave=False):
-            batch = self.test_iter.__next__()
-            with torch.no_grad():
-                embedding = self.get_embd(batch)
-
-        if self.config["model"]["get_test_stat"]:
-            self.test_epoch(499)
-
-        mesh_file = self.config["model"]["mesh_file"]
-        if mesh_file == None:
-            filename = batch["filename"][0]
-        else:
-            filename = mesh_file
-
-        # specially designed for geodesic dist task. may not operate correctly on other tasks
-        return {
-            "filename": filename,
-            "dist_func": self.embd_decoder_func,
-            "embedding": embedding,
-        }
