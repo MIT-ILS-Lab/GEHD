@@ -28,9 +28,22 @@ class Solver:
         self.disable_tqdm = not (is_master and self.config["solver"]["progress_bar"])
         self.start_epoch = 1
 
+        self.slurm_job_id = os.getenv("SLURM_JOB_ID")
+        self.slurm_job_name = os.getenv("SLURM_JOB_NAME")
+        logger.info(f"slurm configs: {self.slurm_job_id}, {self.slurm_job_name}")
+
         self.rank = dist.get_rank() if dist.is_initialized() else 0
 
-        if self.rank == 0:
+        if self.slurm_job_name == "JupyterNotebook":
+            self.log_wandb = False
+        else:
+            self.log_wandb = True
+        logger.info(f"wandb logging: {self.log_wandb}")
+
+        if "run_name" not in self.config["solver"]["wandb"].keys():
+            self.config["solver"]["wandb"]["run_name"] = self.slurm_job_id
+
+        if self.rank == 0 and self.log_wandb:
             wandb.init(
                 project=self.config["solver"]["wandb"]["project_name"],
                 name=self.config["solver"]["wandb"]["run_name"],
@@ -38,6 +51,11 @@ class Solver:
                 config=self.config,
                 mode="offline",
             )
+            logger.info(
+                f"wandb project name: {self.config['solver']['wandb']['project_name']}"
+            )
+            logger.info(f"wandb run name: {self.config['solver']['wandb']['run_name']}")
+            logger.info(f"wandb dir: {self.config['solver']['logdir']}")
 
         self.model = None
         self.optimizer = None
@@ -409,3 +427,4 @@ class Solver:
 
     def run(self):
         eval("self.%s()" % self.config["solver"]["run"])
+        wandb.finish()

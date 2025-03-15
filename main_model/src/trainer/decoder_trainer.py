@@ -283,7 +283,6 @@ class LEHDTrainer(Solver):
 
         # Return output dictionary for tracker
         return {
-            "test/loss": current_best_length.mean(),
             "test/optimal_score": optimal_length.mean(),
             "test/student_score": current_best_length.mean(),
             "test/gap_percentage": gap,
@@ -335,26 +334,3 @@ class LEHDTrainer(Solver):
             current_position[is_depot] = depot[is_depot]
 
         return total_distance
-
-    def save_checkpoint(self, epoch):
-        # Call parent method
-        super().save_checkpoint(epoch)
-
-        # Additional LEHD-specific checkpoint saving
-        checkpoint_path = f"{self.logdir}/checkpoint-{epoch}.pt"
-
-        # Create checkpoint dictionary
-        checkpoint = {
-            "model_state_dict": self.model.state_dict(),
-            "optimizer_state_dict": self.optimizer.state_dict(),
-            "scheduler_state_dict": self.scheduler.state_dict(),
-            "epoch": epoch,
-            "result_log": self.result_log.get_raw_data(),
-        }
-
-        # Save checkpoint
-        torch.save(checkpoint, checkpoint_path)
-
-        # Log to wandb
-        if self.rank == 0:
-            wandb.save(checkpoint_path)

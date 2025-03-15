@@ -3,7 +3,6 @@ import logging
 
 from main_model.src.trainer.base_trainer import Solver
 from main_model.src.architecture.encoder_architecture import GraphUNet
-from main_model.src.utils.config import load_config, parse_args
 from main_model.src.data.encoder_dataloader import get_dataset
 
 logger = logging.getLogger(__name__)
