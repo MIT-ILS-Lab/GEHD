@@ -17,7 +17,7 @@ def load_config(config_file):
     return config
 
 
-def parse_args(path="main_model/config.yaml"):
+def parse_args(path="main_model/configs/config.yaml"):
     """
     Parses command-line arguments.
 

@@ -2,6 +2,9 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 from tqdm import tqdm
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LEHDBatchSampler(torch.utils.data.Sampler):
@@ -106,6 +109,8 @@ class LEHDDataset(Dataset):
                 tow_col_node_flag.append([node_flag[i], node_flag[V + i]])
             return tow_col_node_flag
 
+        logging.info(f"Start loading {self.mode} dataset...")
+
         if self.mode == "train":
             self.raw_data_nodes_1 = []
             self.raw_data_capacity_1 = []
@@ -115,7 +120,7 @@ class LEHDDataset(Dataset):
 
             for line in tqdm(
                 open(self.data_path, "r").readlines()[0 : int(0.5 * episode)],
-                ascii=True,
+                desc="Loading first half of the data",
             ):
                 line = line.split(",")
 
@@ -183,7 +188,7 @@ class LEHDDataset(Dataset):
                 open(self.data_path, "r").readlines()[
                     int(0.5 * episode) : int(episode)
                 ],
-                ascii=True,
+                desc="Loading second half of the data",
             ):
                 line = line.split(",")
 
@@ -265,7 +270,8 @@ class LEHDDataset(Dataset):
             self.raw_data_node_flag = []
 
             for line in tqdm(
-                open(self.data_path, "r").readlines()[0:episode], ascii=True
+                open(self.data_path, "r").readlines()[0:episode],
+                desc="Loading the data",
             ):
                 line = line.split(",")
 
@@ -322,7 +328,7 @@ class LEHDDataset(Dataset):
                 self.raw_data_node_flag, requires_grad=False
             ).to(self.device)
 
-        print(f"load raw dataset done!")
+        logging.info(f"Loading {self.mode} dataset done!")
 
     def shuffle_data(self):
         # Shuffle the training set data
@@ -540,10 +546,22 @@ class LEHDDataset(Dataset):
         return new_data, sub_tour
 
 
-def vrp_collate_fn(batch):
+def collate_batch(batch):
     # Collate function to handle batching of variable-sized problems
     problems = torch.stack([item["problem"] for item in batch])
     solutions = torch.stack([item["solution"] for item in batch])
     capacities = torch.stack([item["capacity"] for item in batch])
 
     return {"problems": problems, "solutions": solutions, "capacities": capacities}
+
+
+def get_dataset(config, device):
+    # Create dataset
+    dataset = LEHDDataset(
+        data_path=config["env"]["data_path"],
+        episodes=config["episodes"],
+        mode=config["mode"],
+        sub_path=config["env"]["sub_path"],
+        device=device,
+    )
+    return dataset, collate_batch

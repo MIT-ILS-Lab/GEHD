@@ -3,6 +3,7 @@ import yaml
 
 from main_model.src.utils.config import load_config, parse_args
 from main_model.src.trainer.encoder_trainer import GeGnnTrainer
+from main_model.src.trainer.decoder_trainer import LEHDTrainer
 
 # Configure the logger
 logging.basicConfig(
@@ -14,9 +15,23 @@ logging.basicConfig(
     ],
 )
 
+
+TYPE = "decoder"  # Set to "encoder" or "decoder"
+
 if __name__ == "__main__":
+    if TYPE == "encoder":
+        # Load the config file
+        path = "main_model/configs/config_encoder.yaml"
+    elif TYPE == "decoder":
+        # Load the config file
+        path = "main_model/configs/config_decoder.yaml"
+    else:
+        raise ValueError("Unknown type, please select either 'encoder' or 'decoder'.")
+
+    logging.info(f"Running {TYPE} training.")
+
     # Load the config file
-    args = parse_args()
+    args = parse_args(path=path)
     config = load_config(args.config)
 
     # Pretty-print the config using YAML formatting
@@ -24,5 +39,13 @@ if __name__ == "__main__":
         f"Loaded configuration from {config}:\n{yaml.dump(config, default_flow_style=False, sort_keys=False)}"
     )
 
-    solver = GeGnnTrainer(config)
+    if TYPE == "encoder":
+        # Initialize the encoder trainer
+        solver = GeGnnTrainer(config)
+    elif TYPE == "decoder":
+        # Initialize the decoder trainer
+        solver = LEHDTrainer(config)
+    else:
+        raise ValueError("Unknown type, please select either 'encoder' or 'decoder'.")
+
     solver.run()

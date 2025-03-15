@@ -184,9 +184,6 @@ def util_save_log_image_with_label(
     plt.close(fig)
 
 
-# /public/home/luof/project/BQ-POMO/CVRP/utils/log_image_style/style_tsp_100.json
-
-
 def _build_log_image_plt(img_params, result_log: LogData, labels=None):
     assert type(result_log) == LogData, "use LogData Class for result_log."
 

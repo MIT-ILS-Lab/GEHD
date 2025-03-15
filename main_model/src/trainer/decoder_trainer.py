@@ -5,10 +5,9 @@ from torch.utils.data import DataLoader
 
 from main_model.src.architecture.decoder_architecture import LEHD
 from main_model.src.data.decoder_dataloader import (
-    LEHDDataset,
     LEHDBatchSampler,
     InfiniteLEHDBatchSampler,
-    vrp_collate_fn,
+    get_dataset,
 )
 from main_model.src.utils.general_utils import LogData, TimeEstimator
 from main_model.src.trainer.base_trainer import Solver
@@ -34,28 +33,14 @@ class LEHDTrainer(Solver):
         return LEHD(**config)
 
     def get_dataset(self, config):
-        # Determine if this is train or test config
-        is_train = config.get("mode", "train") == "train"
-
-        # Use appropriate parameters based on mode
-        params = self.trainer_params if is_train else self.testing_params
-
-        # Create dataset
-        dataset = LEHDDataset(
-            data_path=params["env"]["data_path"],
-            episodes=params["episodes"],
-            mode="train" if is_train else "test",
-            sub_path=params["env"]["sub_path"],
-            device=self.device,
-        )
-        return dataset, vrp_collate_fn
+        return get_dataset(config, self.device)
 
     def get_dataloader(self, config):
         # Override to use custom batch sampler
         dataset, collate_fn = self.get_dataset(config)
 
         # Determine if this is train or test config
-        is_train = config.get("mode", "train") == "train"
+        is_train = config["mode"] == "train"
         params = self.trainer_params if is_train else self.testing_params
 
         # Create batch sampler
