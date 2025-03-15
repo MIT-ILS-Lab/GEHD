@@ -9,7 +9,6 @@ from main_model.src.data.decoder_dataloader import (
     InfiniteLEHDBatchSampler,
     get_dataset,
 )
-from main_model.src.utils.general_utils import LogData, TimeEstimator
 from main_model.src.trainer.base_trainer import Solver
 
 
@@ -20,10 +19,6 @@ class LEHDTrainer(Solver):
         # Store trainer and testing params
         self.trainer_params = config["data"]["train"]
         self.testing_params = config["data"]["test"]
-
-        # Additional tracking specific to LEHD
-        self.result_log = LogData()
-        self.time_estimator = TimeEstimator()
 
         # Set random seed
         torch.manual_seed(22)

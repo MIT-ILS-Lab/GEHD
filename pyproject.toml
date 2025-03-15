@@ -26,6 +26,8 @@ dependencies = [
     "torch-geometric",
     "torch-scatter",
     "wandb",
+    "h5py==3.13.0",
+    "pyvrp==0.10.0"
 ]
 
 [tool.setuptools]
