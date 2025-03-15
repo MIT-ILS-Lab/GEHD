@@ -18,7 +18,7 @@ if __name__ == "__main__":
     args = parse_args(path="main_model/config_decoder.yaml")
     config = load_config(args.config)
 
-    trainer = LEHDTrainer(config["train"])
+    trainer = LEHDTrainer(config)
     trainer.run()
 
 # TODO:

@@ -187,7 +187,9 @@ class Solver:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
                 if self.accumulation_steps > 1:
-                    logging.info(f"Successfully ran accumulated gradient step at step {self.global_step}")
+                    logging.info(
+                        f"Successfully ran accumulated gradient step at step {self.global_step}"
+                    )
 
             # track the averaged tensors
             elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
@@ -227,7 +229,7 @@ class Solver:
     def test_epoch(self, epoch, pbar):
         self.model.eval()
         test_tracker = AverageTracker()
-        test_err_distribution = []
+        # test_err_distribution = []
         rng = range(len(self.test_loader))
 
         for it in tqdm(rng, ncols=80, leave=False, disable=self.disable_tqdm):
@@ -237,12 +239,12 @@ class Solver:
             batch["epoch"] = epoch
             output = self.test_step(batch)
             loss = output["test/loss"]
-            try:
-                test_err_distribution.append(
-                    batch["filename"][0] + " " + str(float(loss))
-                )
-            except:
-                raise ValueError("The filename is not in the batch.")
+            # try:
+            #     test_err_distribution.append(
+            #         batch["filename"][0] + " " + str(float(loss))
+            #     )
+            # except:
+            #     raise ValueError("The filename is not in the batch.")
             # track the averaged tensors
             test_tracker.update(output)
 

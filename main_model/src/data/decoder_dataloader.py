@@ -38,6 +38,22 @@ class LEHDBatchSampler(torch.utils.data.Sampler):
             yield batch_indices
 
 
+class InfiniteLEHDBatchSampler:
+    def __init__(self, batch_sampler):
+        self.batch_sampler = batch_sampler
+
+    def __iter__(self):
+        while True:
+            # Create a fresh iterator from the batch sampler each time
+            batch_iter = iter(self.batch_sampler)
+            for batch in batch_iter:
+                yield batch
+
+    def __len__(self):
+        # Return the length of the underlying batch sampl
+        return len(self.batch_sampler)
+
+
 class LEHDDataset(Dataset):
     def __init__(
         self, data_path, mode="train", episodes=100, sub_path=False, device=None

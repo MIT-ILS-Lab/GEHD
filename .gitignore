@@ -15,4 +15,9 @@ disk
 *.pt
 *.json
 *.wandb
+*.tar
+*.pth
+
+events.*
+wandb*
 __pycache__
