@@ -1,4 +1,5 @@
 import torch
+import h5py
 from torch.utils.data import Dataset
 import numpy as np
 from tqdm import tqdm
@@ -53,7 +54,7 @@ class InfiniteLEHDBatchSampler:
                 yield batch
 
     def __len__(self):
-        # Return the length of the underlying batch sampl
+        # Return the length of the underlying batch sampler
         return len(self.batch_sampler)
 
 
@@ -74,15 +75,23 @@ class LEHDDataset(Dataset):
         # Load the raw data
         self.load_raw_data(self.episodes)
 
+        # Load mesh data for computing node locations
+        self.load_mesh_data()
+
     def __len__(self):
-        return self.episodes
+        return len(self.raw_data_problems)
 
     def __getitem__(self, args):
         # Get a single problem instance
         idx = args[0]
         fixed_length = args[1]
 
-        nodes = self.raw_data_nodes[idx]
+        # Get problem indices
+        problem_indices = self.raw_data_problems[idx]
+
+        # Get node coordinates from mesh city using problem indices
+        # nodes = self.city[problem_indices]
+
         capacity = self.raw_data_capacity[idx]
         demand = self.raw_data_demand[idx]
         solution = self.raw_data_node_flag[idx]
@@ -90,7 +99,12 @@ class LEHDDataset(Dataset):
         # Create the problem representation
         capacity_expanded = capacity.unsqueeze(0).repeat(solution.shape[0] + 1)
         problem = torch.cat(
-            (nodes, demand.unsqueeze(-1), capacity_expanded.unsqueeze(-1)), dim=1
+            (
+                problem_indices.unsqueeze(-1),
+                demand.unsqueeze(-1),
+                capacity_expanded.unsqueeze(-1),
+            ),
+            dim=1,
         )
 
         # Apply subpath sampling if needed, using the provided fixed_length
@@ -101,219 +115,72 @@ class LEHDDataset(Dataset):
 
         return {"problem": problem, "solution": solution, "capacity": capacity}
 
+    def load_mesh_data(self):
+        """Load the mesh data to get node coordinates"""
+        with h5py.File(self.data_path, "r") as hf:
+            # Load mesh data
+            self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False).to(
+                self.device
+            )
+            self.faces = torch.tensor(hf["faces"][:], requires_grad=False).to(
+                self.device
+            )
+            self.city = torch.tensor(hf["city"][:], requires_grad=False).to(self.device)
+            self.city_indices = torch.tensor(
+                hf["city_indices"][:], requires_grad=False
+            ).to(self.device)
+            self.geodesic_matrix = torch.tensor(
+                hf["geodesic_matrix"][:], requires_grad=False
+            ).to(self.device)
+
+        logging.info(f"Loaded mesh data with {len(self.city)} city points")
+
     def load_raw_data(self, episode=1000000):
+        logging.info(f"Start loading {self.mode} dataset from HDF5 file...")
+
+        # Helper function to convert one-row node_flag to two-column format
         def tow_col_nodeflag(node_flag):
             tow_col_node_flag = []
             V = int(len(node_flag) / 2)
             for i in range(V):
-                tow_col_node_flag.append([node_flag[i], node_flag[V + i]])
+                tow_col_node_flag.append([int(node_flag[i]), int(node_flag[V + i])])
             return tow_col_node_flag
 
-        logging.info(f"Start loading {self.mode} dataset...")
+        assert self.data_path.endswith(".h5"), "Data file must be in HDF5 format"
 
-        if self.mode == "train":
-            self.raw_data_nodes_1 = []
-            self.raw_data_capacity_1 = []
-            self.raw_data_demand_1 = []
-            self.raw_data_cost_1 = []
-            self.raw_data_node_flag_1 = []
+        with h5py.File(self.data_path, "r") as hf:
+            # Determine how many problems to load
+            total_problems = len(hf["problems"])
+            num_problems = min(episode, total_problems)
 
-            for line in tqdm(
-                open(self.data_path, "r").readlines()[0 : int(0.5 * episode)],
-                desc="Loading first half of the data",
-            ):
-                line = line.split(",")
-
-                depot_index = int(line.index("depot"))
-                customer_index = int(line.index("customer"))
-                capacity_index = int(line.index("capacity"))
-                demand_index = int(line.index("demand"))
-                cost_index = int(line.index("cost"))
-                node_flag_index = int(line.index("node_flag"))
-
-                depot = [[float(line[depot_index + 1]), float(line[depot_index + 2])]]
-                customer = [
-                    [float(line[idx]), float(line[idx + 1])]
-                    for idx in range(customer_index + 1, capacity_index, 2)
-                ]
-
-                loc = depot + customer
-                capacity = int(float(line[capacity_index + 1]))
-
-                if int(line[demand_index + 1]) == 0:
-                    demand = [
-                        int(line[idx]) for idx in range(demand_index + 1, cost_index)
-                    ]
-                else:
-                    demand = [0] + [
-                        int(line[idx]) for idx in range(demand_index + 1, cost_index)
-                    ]
-
-                cost = float(line[cost_index + 1])
-                node_flag = [
-                    int(line[idx]) for idx in range(node_flag_index + 1, len(line))
-                ]
-                node_flag = tow_col_nodeflag(node_flag)
-
-                self.raw_data_nodes_1.append(loc)
-                self.raw_data_capacity_1.append(capacity)
-                self.raw_data_demand_1.append(demand)
-                self.raw_data_cost_1.append(cost)
-                self.raw_data_node_flag_1.append(node_flag)
-
-            self.raw_data_nodes_1 = torch.tensor(
-                self.raw_data_nodes_1, requires_grad=False
-            ).to(self.device)
-            self.raw_data_capacity_1 = torch.tensor(
-                self.raw_data_capacity_1, requires_grad=False
-            ).to(self.device)
-            self.raw_data_demand_1 = torch.tensor(
-                self.raw_data_demand_1, requires_grad=False
-            ).to(self.device)
-            self.raw_data_cost_1 = torch.tensor(
-                self.raw_data_cost_1, requires_grad=False
-            ).to(self.device)
-            self.raw_data_node_flag_1 = torch.tensor(
-                self.raw_data_node_flag_1, requires_grad=False
-            ).to(self.device)
-
-            # Load second half of data
-            self.raw_data_nodes_2 = []
-            self.raw_data_capacity_2 = []
-            self.raw_data_demand_2 = []
-            self.raw_data_cost_2 = []
-            self.raw_data_node_flag_2 = []
-
-            for line in tqdm(
-                open(self.data_path, "r").readlines()[
-                    int(0.5 * episode) : int(episode)
-                ],
-                desc="Loading second half of the data",
-            ):
-                line = line.split(",")
-
-                depot_index = int(line.index("depot"))
-                customer_index = int(line.index("customer"))
-                capacity_index = int(line.index("capacity"))
-                demand_index = int(line.index("demand"))
-                cost_index = int(line.index("cost"))
-                node_flag_index = int(line.index("node_flag"))
-
-                depot = [[float(line[depot_index + 1]), float(line[depot_index + 2])]]
-                customer = [
-                    [float(line[idx]), float(line[idx + 1])]
-                    for idx in range(customer_index + 1, capacity_index, 2)
-                ]
-
-                loc = depot + customer
-                capacity = int(float(line[capacity_index + 1]))
-
-                if int(line[demand_index + 1]) == 0:
-                    demand = [
-                        int(line[idx]) for idx in range(demand_index + 1, cost_index)
-                    ]
-                else:
-                    demand = [0] + [
-                        int(line[idx]) for idx in range(demand_index + 1, cost_index)
-                    ]
-
-                cost = float(line[cost_index + 1])
-                node_flag = [
-                    int(line[idx]) for idx in range(node_flag_index + 1, len(line))
-                ]
-                node_flag = tow_col_nodeflag(node_flag)
-
-                self.raw_data_nodes_2.append(loc)
-                self.raw_data_capacity_2.append(capacity)
-                self.raw_data_demand_2.append(demand)
-                self.raw_data_cost_2.append(cost)
-                self.raw_data_node_flag_2.append(node_flag)
-
-            self.raw_data_nodes_2 = torch.tensor(
-                self.raw_data_nodes_2, requires_grad=False
-            ).to(self.device)
-            self.raw_data_capacity_2 = torch.tensor(
-                self.raw_data_capacity_2, requires_grad=False
-            ).to(self.device)
-            self.raw_data_demand_2 = torch.tensor(
-                self.raw_data_demand_2, requires_grad=False
-            ).to(self.device)
-            self.raw_data_cost_2 = torch.tensor(
-                self.raw_data_cost_2, requires_grad=False
-            ).to(self.device)
-            self.raw_data_node_flag_2 = torch.tensor(
-                self.raw_data_node_flag_2, requires_grad=False
-            ).to(self.device)
-
-            # Combine both halves
-            self.raw_data_nodes = torch.cat(
-                (self.raw_data_nodes_1, self.raw_data_nodes_2), dim=0
-            )
-            self.raw_data_capacity = torch.cat(
-                (self.raw_data_capacity_1, self.raw_data_capacity_2), dim=0
-            )
-            self.raw_data_demand = torch.cat(
-                (self.raw_data_demand_1, self.raw_data_demand_2), dim=0
-            )
-            self.raw_data_cost = torch.cat(
-                (self.raw_data_cost_1, self.raw_data_cost_2), dim=0
-            )
-            self.raw_data_node_flag = torch.cat(
-                (self.raw_data_node_flag_1, self.raw_data_node_flag_2), dim=0
-            )
-
-        elif self.mode == "test":
-            self.raw_data_nodes = []
+            # Initialize lists for data
             self.raw_data_capacity = []
             self.raw_data_demand = []
             self.raw_data_cost = []
             self.raw_data_node_flag = []
+            self.raw_data_problems = []  # Store the problem indices
 
-            for line in tqdm(
-                open(self.data_path, "r").readlines()[0:episode],
-                desc="Loading the data",
-            ):
-                line = line.split(",")
+            # Load problems
+            for i in tqdm(range(num_problems), desc=f"Loading {self.mode} data"):
+                # Get problem data
+                problem = hf["problems"][i]
+                demand = hf["demands"][i]
+                capacity = hf["capacities"][i]
+                distance = hf["distances"][i]
+                node_flag = hf["node_flags"][i]
 
-                depot_index = int(line.index("depot"))
-                customer_index = int(line.index("customer"))
-                capacity_index = int(line.index("capacity"))
-                demand_index = int(line.index("demand"))
-                cost_index = int(line.index("cost"))
-                node_flag_index = int(line.index("node_flag"))
-
-                depot = [[float(line[depot_index + 1]), float(line[depot_index + 2])]]
-                customer = [
-                    [float(line[idx]), float(line[idx + 1])]
-                    for idx in range(customer_index + 1, capacity_index, 2)
-                ]
-
-                loc = depot + customer
-                capacity = int(float(line[capacity_index + 1]))
-
-                if int(line[demand_index + 1]) == 0:
-                    demand = [
-                        int(line[idx]) for idx in range(demand_index + 1, cost_index)
-                    ]
-                else:
-                    demand = [0] + [
-                        int(line[idx]) for idx in range(demand_index + 1, cost_index)
-                    ]
-
-                cost = float(line[cost_index + 1])
-                node_flag = [
-                    int(line[idx]) for idx in range(node_flag_index + 1, len(line))
-                ]
+                # Convert node_flag to two-column format
                 node_flag = tow_col_nodeflag(node_flag)
 
-                self.raw_data_nodes.append(loc)
-                self.raw_data_capacity.append(capacity)
-                self.raw_data_demand.append(demand)
-                self.raw_data_cost.append(cost)
+                self.raw_data_problems.append(problem.tolist())
+                self.raw_data_capacity.append(int(capacity))
+                self.raw_data_demand.append(demand.tolist())
+                self.raw_data_cost.append(float(distance))
                 self.raw_data_node_flag.append(node_flag)
 
-            self.raw_data_nodes = torch.tensor(
-                self.raw_data_nodes, requires_grad=False
+            # Convert to tensors
+            self.raw_data_problems = torch.tensor(
+                self.raw_data_problems, requires_grad=False
             ).to(self.device)
             self.raw_data_capacity = torch.tensor(
                 self.raw_data_capacity, requires_grad=False
@@ -328,18 +195,25 @@ class LEHDDataset(Dataset):
                 self.raw_data_node_flag, requires_grad=False
             ).to(self.device)
 
-        logging.info(f"Loading {self.mode} dataset done!")
+        logging.info(
+            f"Loading {self.mode} dataset done! Loaded {len(self.raw_data_capacity)} problems."
+        )
 
     def shuffle_data(self):
         # Shuffle the training set data
-        index = torch.randperm(len(self.raw_data_nodes)).long()
-        self.raw_data_nodes = self.raw_data_nodes[index]
+        index = torch.randperm(len(self.raw_data_problems)).long()
+        self.raw_data_problems = self.raw_data_problems[index]
         self.raw_data_capacity = self.raw_data_capacity[index]
         self.raw_data_demand = self.raw_data_demand[index]
         self.raw_data_cost = self.raw_data_cost[index]
         self.raw_data_node_flag = self.raw_data_node_flag[index]
 
     def vrp_whole_and_solution_subrandom_inverse(self, solution):
+        """Randomly flips the entire solution or individual subtours"""
+        # Check if we have valid input
+        if solution.shape[0] == 0 or solution.shape[1] == 0:
+            return solution
+
         clockwise_or_not = torch.rand(1)[0]
 
         if clockwise_or_not >= 0.5:
@@ -351,58 +225,96 @@ class LEHDDataset(Dataset):
         batch_size = solution.shape[0]
         problem_size = solution.shape[1]
 
+        # Count depot visits in each solution
         visit_depot_num = torch.sum(solution[:, :, 1], dim=1)
+
+        # Skip processing if there are no depot visits
+        if torch.min(visit_depot_num) == 0:
+            return solution
+
         all_subtour_num = torch.sum(visit_depot_num)
 
+        # Add a sentinel value to mark the end
         fake_solution = torch.cat(
             (solution[:, :, 1], torch.ones(batch_size)[:, None]), dim=1
         )
         start_from_depot = fake_solution.nonzero()
+
+        # Handle empty solutions
+        if len(start_from_depot) == 0:
+            return solution
+
         start_from_depot_1 = start_from_depot[:, 1]
         start_from_depot_2 = torch.roll(start_from_depot_1, shifts=-1)
         sub_tours_length = start_from_depot_2 - start_from_depot_1
+
+        # Handle case with no valid subtours
+        if len(sub_tours_length) == 0:
+            return solution
+
         max_subtour_length = torch.max(sub_tours_length)
 
         # 2. Extract and process subtours
         start_from_depot2 = solution[:, :, 1].nonzero()
         start_from_depot3 = solution[:, :, 1].roll(shifts=-1, dims=1).nonzero()
 
+        # Handle case with no depot visits
+        if len(start_from_depot2) == 0 or len(start_from_depot3) == 0:
+            return solution
+
+        # Repeat solutions for each depot visit
         repeat_solutions_node = solution[:, :, 0].repeat_interleave(
             visit_depot_num, dim=0
         )
         double_repeat_solution_node = repeat_solutions_node.repeat(1, 2)
 
+        # Create masks for subtour extraction
         x1 = (
-            torch.arange(double_repeat_solution_node.shape[1])[None, :].repeat(
-                len(repeat_solutions_node), 1
-            )
+            torch.arange(double_repeat_solution_node.shape[1], device=self.device)[
+                None, :
+            ].repeat(len(repeat_solutions_node), 1)
             >= start_from_depot2[:, 1][:, None]
         )
         x2 = (
-            torch.arange(double_repeat_solution_node.shape[1])[None, :].repeat(
-                len(repeat_solutions_node), 1
-            )
+            torch.arange(double_repeat_solution_node.shape[1], device=self.device)[
+                None, :
+            ].repeat(len(repeat_solutions_node), 1)
             <= start_from_depot3[:, 1][:, None]
         )
         x3 = (x1 * x2).long()
         sub_tourss = double_repeat_solution_node * x3
 
-        x4 = torch.arange(double_repeat_solution_node.shape[1])[None, :].repeat(
-            len(repeat_solutions_node), 1
-        ) < (start_from_depot2[:, 1][:, None] + max_subtour_length)
+        x4 = torch.arange(double_repeat_solution_node.shape[1], device=self.device)[
+            None, :
+        ].repeat(len(repeat_solutions_node), 1) < (
+            start_from_depot2[:, 1][:, None] + max_subtour_length
+        )
         x5 = x1 * x4
+
+        # Skip if no valid subtours
+        if not x5.any():
+            return solution
+
         sub_tours_padding = sub_tourss[x5].reshape(all_subtour_num, max_subtour_length)
 
         # 3. Randomly flip subtours
-        clockwise_or_not = torch.rand(len(sub_tours_padding))
+        clockwise_or_not = torch.rand(len(sub_tours_padding), device=self.device)
         clockwise_or_not_bool = clockwise_or_not.le(0.5)
-        sub_tours_padding[clockwise_or_not_bool] = torch.flip(
-            sub_tours_padding[clockwise_or_not_bool], dims=[1]
-        )
+
+        # Only flip if we have valid subtours to flip
+        if clockwise_or_not_bool.any():
+            sub_tours_padding[clockwise_or_not_bool] = torch.flip(
+                sub_tours_padding[clockwise_or_not_bool], dims=[1]
+            )
 
         # 4. Map back to original solution
-        sub_tourss_back = sub_tourss
+        sub_tourss_back = sub_tourss.clone()
         sub_tourss_back[x5] = sub_tours_padding.ravel()
+
+        # Skip if no valid values
+        if not sub_tourss_back.gt(0.1).any():
+            return solution
+
         solution_node_flip = sub_tourss_back[sub_tourss_back.gt(0.1)].reshape(
             batch_size, problem_size
         )
@@ -416,46 +328,91 @@ class LEHDDataset(Dataset):
         """
         For each instance, shift randomly so that different end_with depot nodes can reach the last digit.
         """
+        # Check if we have valid input
+        if solution.shape[0] == 0 or solution.shape[1] == 0:
+            return solution
+
         problem_size = solution.shape[1]
         batch_size = solution.shape[0]
 
+        # Find depot visits
         start_from_depot = solution[:, :, 1].nonzero()
+
+        # Skip if no depot visits
+        if len(start_from_depot) == 0:
+            return solution
+
         end_with_depot = start_from_depot.clone()
         end_with_depot[:, 1] = end_with_depot[:, 1] - 1
-        end_with_depot[end_with_depot.le(-0.5)] = solution.shape[1] - 1
+
+        # Fix all negative indices, not just the first one
+        negative_indices = end_with_depot[:, 1] < 0
+        end_with_depot[negative_indices, 1] = solution.shape[1] - 1
+
         end_with_depot[:, 1] = torch.roll(end_with_depot[:, 1], dims=0, shifts=-1)
         visit_depot_num = solution[:, :, 1].sum(1)
+
+        # Skip if no depot visits
+        if torch.min(visit_depot_num) == 0:
+            return solution
+
         min_length = torch.min(visit_depot_num)
 
-        first_node_index = torch.randint(low=0, high=min_length, size=[1])[
-            0
-        ]  # in [0,N)
+        # Generate random index for first node
+        first_node_index = torch.randint(
+            low=0, high=max(1, min_length.item()), size=[1], device=self.device
+        )[0]
 
-        temp_tri = np.triu(np.ones((len(visit_depot_num), len(visit_depot_num))), k=1)
-        visit_depot_num_numpy = visit_depot_num.clone().cpu().numpy()
+        # Use PyTorch for the triangular matrix operation to avoid NumPy conversion
+        batch_size_int = len(visit_depot_num)
+        temp_tri = torch.triu(
+            torch.ones((batch_size_int, batch_size_int), device=self.device), diagonal=1
+        )
 
-        temp_index = np.dot(visit_depot_num_numpy, temp_tri)
-        temp_index_torch = torch.from_numpy(temp_index).long().to(self.device)
+        # Perform matrix multiplication in PyTorch
+        temp_index_torch = torch.matmul(visit_depot_num.float(), temp_tri).long()
 
         pick_end_with_depot_index = temp_index_torch + first_node_index
+
+        # Ensure indices are within bounds
+        valid_indices = pick_end_with_depot_index < len(end_with_depot)
+        if not valid_indices.all():
+            pick_end_with_depot_index = torch.clamp(
+                pick_end_with_depot_index, 0, len(end_with_depot) - 1
+            )
+
         pick_end_with_depot_ = end_with_depot[pick_end_with_depot_index][:, 1]
         first_index = pick_end_with_depot_
         end_indeex = pick_end_with_depot_ + problem_size
 
-        index = torch.arange(2 * problem_size)[None, :].repeat(batch_size, 1)
+        # Create indices for the double solution
+        index = torch.arange(2 * problem_size, device=self.device)[None, :].repeat(
+            batch_size, 1
+        )
         x1 = index > first_index[:, None]
         x2 = index <= end_indeex[:, None]
         x3 = x1.int() * x2.int()
-        double_solution = solution.repeat(1, 2, 1)
-        solution = double_solution[x3.gt(0.5)[:, :, None].repeat(1, 1, 2)].reshape(
-            batch_size, problem_size, 2
-        )
 
-        return solution
+        # Skip if no valid indices
+        if not x3.gt(0.5).any():
+            return solution
+
+        double_solution = solution.repeat(1, 2, 1)
+
+        # Use masked_select for more efficient selection
+        mask = x3.gt(0.5)[:, :, None].repeat(1, 1, 2)
+        selected = double_solution[mask].view(batch_size, problem_size, 2)
+
+        return selected
 
     def sampling_subpaths(self, problem, solution, fixed_length=None):
-        # problem shape (V+1,4)
-        # solution shape (V,2)
+        """
+        Sample subpaths from the solution for training.
+        Handles edge cases and improves robustness.
+        """
+        # Check if we have valid input
+        if problem.shape[0] <= 1 or solution.shape[0] == 0:
+            return problem, solution
 
         # 1. Extract subtour
         problems_size = problem.shape[0] - 1  # Excluding depot
@@ -463,37 +420,64 @@ class LEHDDataset(Dataset):
 
         # Use fixed length if provided, otherwise random
         if fixed_length is not None:
-            length_of_subpath = fixed_length
+            length_of_subpath = min(
+                fixed_length, problems_size
+            )  # Ensure length doesn't exceed problem size
         else:
             # Random length of subpath between 4 and problem size
-            length_of_subpath = torch.randint(low=4, high=problems_size + 1, size=[1])[
-                0
-            ]
+            length_of_subpath = torch.randint(
+                low=min(4, problems_size),
+                high=problems_size + 1,
+                size=[1],
+                device=self.device,
+            )[0]
 
-        # Apply data augmentation
-        solution = self.vrp_whole_and_solution_subrandom_inverse(
-            solution.unsqueeze(0)
-        ).squeeze(0)
-        solution = self.vrp_whole_and_solution_subrandom_shift_V2inverse(
-            solution.unsqueeze(0)
-        ).squeeze(0)
+        # Apply data augmentation with error handling
+        try:
+            solution = self.vrp_whole_and_solution_subrandom_inverse(
+                solution.unsqueeze(0)
+            ).squeeze(0)
+
+            solution = self.vrp_whole_and_solution_subrandom_shift_V2inverse(
+                solution.unsqueeze(0)
+            ).squeeze(0)
+        except Exception as e:
+            logging.warning(
+                f"Error in data augmentation: {e}. Using original solution."
+            )
 
         # Find points that start from depot
-        start_from_depot = solution[:, 1].nonzero().squeeze(1)
-        end_with_depot = start_from_depot.clone()
-        end_with_depot = end_with_depot - 1
-        if end_with_depot[0] < 0:
-            end_with_depot[0] = solution.shape[0] - 1
+        depot_visits = solution[:, 1].nonzero()
+
+        # Handle case with no depot visits
+        if len(depot_visits) == 0:
+            # If no depot visits, use the entire solution as is
+            return problem, solution
+
+        start_from_depot = depot_visits.squeeze(1)
+        end_with_depot = start_from_depot.clone() - 1
+
+        # Fix all negative indices
+        negative_indices = end_with_depot < 0
+        end_with_depot[negative_indices] = solution.shape[0] - 1
 
         # Count depot visits
         visit_depot_num = torch.sum(solution[:, 1])
 
+        # Handle case with no depot visits
+        if visit_depot_num == 0:
+            return problem, solution
+
         # Randomly select end point
-        p = torch.rand(1)
+        p = torch.rand(1, device=self.device)
         select_end_with_depot_node_index = p * visit_depot_num
         select_end_with_depot_node_index = torch.floor(
             select_end_with_depot_node_index
         ).long()
+
+        # Ensure index is in bounds
+        if select_end_with_depot_node_index >= len(end_with_depot):
+            select_end_with_depot_node_index = len(end_with_depot) - 1
 
         # This is the point at which the instance is randomly selected with an end with depot
         select_end_with_depot_node = end_with_depot[select_end_with_depot_node_index]
@@ -504,19 +488,29 @@ class LEHDDataset(Dataset):
 
         # Create indices for subpath extraction
         offset = select_end_with_depot_node - length_of_subpath + 1
-        indexx = torch.arange(length_of_subpath) + offset
+        indexx = torch.arange(length_of_subpath, device=self.device) + offset
+
+        # Ensure indices are in bounds
+        if torch.max(indexx) >= double_solution.shape[0]:
+            indexx = torch.clamp(indexx, 0, double_solution.shape[0] - 1)
+
         sub_tour = double_solution[indexx, :]
 
         # Calculate the capacity of the first point
         start_index = indexx[0]
 
         # Process capacity constraints
-        x1 = torch.arange(solution.shape[0]) <= start_index
+        x1 = torch.arange(solution.shape[0], device=self.device) <= start_index
         before_is_via_depot_all = solution[:, 1] * x1
         visit_depot_num_2 = torch.sum(before_is_via_depot_all)
 
         # Update node indices for the subpath
         sub_solution_node = sub_tour[:, 0]
+
+        # Handle empty subpaths
+        if len(sub_solution_node) == 0:
+            return problem, solution
+
         new_sulution_ascending, rank = torch.sort(
             sub_solution_node, dim=-1, descending=False
         )
@@ -524,6 +518,7 @@ class LEHDDataset(Dataset):
         sub_tour[:, 0] = new_sulution_rank + 1
 
         # Create the new problem representation
+
         index_2, _ = (
             torch.cat(
                 (
@@ -537,7 +532,7 @@ class LEHDDataset(Dataset):
             .sort(dim=-1, descending=False)
         )
 
-        index_3 = torch.arange(embedding_size, dtype=torch.long)
+        index_3 = torch.arange(embedding_size, dtype=torch.long, device=self.device)
         index_3 = index_3.repeat(length_of_subpath)
 
         new_data = problem[index_2, index_3].view(length_of_subpath, embedding_size)

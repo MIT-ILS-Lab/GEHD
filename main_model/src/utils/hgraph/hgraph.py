@@ -113,7 +113,7 @@ def add_self_loop(data: Data):
     n_vert = data.x.shape[0]
     self_loops = torch.tensor([[i for i in range(int(n_vert))]])
     self_loops = self_loops.repeat(2, 1)
-    new_edges = torch.zeros([2, data.edge_index.shape[1] + n_vert], dtype=torch.int64)
+    new_edges = torch.zeros([2, data.edge_index.shape[1] + n_vert], dtype=torch.int32)
     new_edges[:, : data.edge_index.shape[1]] = data.edge_index
     new_edges[:, data.edge_index.shape[1] :] = self_loops
 

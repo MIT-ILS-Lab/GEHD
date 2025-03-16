@@ -6,41 +6,9 @@ import argparse
 import os
 
 from main_model.src.utils.config import load_config, parse_args
+from main_model.src.utils.general_utils import read_mesh
 from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
-
-
-# a function that reads a triangular mesh, and generates its corresponding graph
-def read_mesh(path, to_tensor=True, device=torch.device("cpu")):
-    mesh = trimesh.load(path)
-    vertices = mesh.vertices
-    edges = mesh.edges_unique
-    edges_reversed = np.concatenate([edges[:, 1:], edges[:, :1]], 1)
-    edges = np.concatenate([edges, edges_reversed], 0)
-    edges = np.transpose(edges)
-    normals = mesh.vertex_normals
-    norm_normals = np.linalg.norm(normals, axis=1)
-    normals = normals / norm_normals[:, np.newaxis]
-    faces = mesh.faces
-    face_normals = mesh.face_normals
-    face_areas = mesh.area_faces
-
-    if to_tensor:
-        vertices = torch.from_numpy(vertices).float().to(device)
-        edges = torch.from_numpy(edges).long().to(device)
-        normals = torch.from_numpy(np.array(normals)).float().to(device)
-        faces = torch.from_numpy(faces).long().to(device)
-        face_normals = torch.from_numpy(np.array(face_normals)).float().to(device)
-        face_areas = torch.from_numpy(np.array(face_areas)).float().to(device)
-
-    return {
-        "vertices": vertices,
-        "edges": edges,
-        "normals": normals,
-        "faces": faces,
-        "face_normals": face_normals,
-        "face_areas": face_areas,
-    }
 
 
 # a wrapper for the pretrained model

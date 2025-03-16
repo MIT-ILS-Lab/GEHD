@@ -1,6 +1,4 @@
 import torch
-import wandb
-
 from torch.utils.data import DataLoader
 
 from main_model.src.architecture.decoder_architecture import LEHD
@@ -40,7 +38,7 @@ class LEHDTrainer(Solver):
 
         # Create batch sampler
         dataset_size = len(dataset)
-        problem_size = dataset.raw_data_nodes.shape[1] - 1
+        problem_size = dataset.raw_data_problems.shape[1] - 1
         batch_sampler = LEHDBatchSampler(
             dataset_size,
             problem_size,
@@ -287,7 +285,7 @@ class LEHDTrainer(Solver):
         """
         Calculate the travel distance for a given solution.
         """
-        problems = problems_[:, :, [0, 1]].clone()
+        problems = problems_[:, :, 0].clone()
         order_node = solution_[:, :, 0].clone()
         order_flag = solution_[:, :, 1].clone()
         travel_distances = self.cal_length(problems, order_node, order_flag)
@@ -296,36 +294,41 @@ class LEHDTrainer(Solver):
 
     def cal_length(self, problems, order_node, order_flag):
         """
-        Calculate the length of routes based on the solution.
+        Calculate the length of routes based on the solution using geodesic distances.
         """
         batch_size = problems.size(0)
-
-        # Get coordinates of the depot (first node)
-        depot = problems[:, 0, :].clone()
 
         # Initialize total distance
         total_distance = torch.zeros(batch_size, device=self.device)
 
-        # Initialize current position as depot
-        current_position = depot.clone()
+        # Get the dataset to access the geodesic matrix
+        dataset = self.train_loader.dataset
+        geodesic_matrix = dataset.geodesic_matrix
+
+        # Initialize current position as depot (index 0)
+        current_position_idx = torch.zeros(
+            batch_size, dtype=torch.long, device=self.device
+        )
 
         # Iterate through the solution
         for i in range(order_node.size(1)):
-            # Get coordinates of the next node
-            next_node_idx = order_node[:, i].unsqueeze(1).unsqueeze(2).expand(-1, -1, 2)
-            next_position = torch.gather(problems, 1, next_node_idx).squeeze(1)
+            # Get index of the next node
+            next_node_idx = order_node[:, i]
 
-            # Calculate distance to next node
-            distance_to_next = torch.sqrt(
-                torch.sum((current_position - next_position) ** 2, dim=1)
-            )
-            total_distance += distance_to_next
+            # Calculate geodesic distance between current and next position
+            for b in range(batch_size):
+                # Get indices for the geodesic matrix lookup
+                curr_idx = problems[b, current_position_idx[b]].long()
+                next_idx = problems[b, next_node_idx[b]].long()
+
+                # Add geodesic distance directly
+                total_distance[b] += geodesic_matrix[curr_idx, next_idx]
 
             # Update current position
-            current_position = next_position.clone()
+            current_position_idx = next_node_idx.clone()
 
             # If returning to depot, update current position to depot
             is_depot = order_flag[:, i] == 1
-            current_position[is_depot] = depot[is_depot]
+            current_position_idx[is_depot] = 0
 
         return total_distance

@@ -2,9 +2,47 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from main_model.src.utils.general_utils import read_mesh
+from main_model.src.architecture.encoder_architecture import GraphUNet
+from main_model.src.utils.hgraph.hgraph import Data, HGraph
+
+
+class PretrainedGeGnn(nn.Module):
+    def __init__(self, ckpt_path, config):
+        super(PretrainedGeGnn, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = GraphUNet(
+            config["in_channels"], config["hidden_channels"], config["out_channels"]
+        ).to(self.device)
+        self.embds = None
+        ckpt = torch.load(ckpt_path, map_location=self.device)
+        self.model.load_state_dict(ckpt["model_dict"])
+
+    def compute_embeddings(self, mesh_path):
+        mesh = read_mesh(mesh_path, device=self.device)
+        with torch.no_grad():
+            vertices = mesh["vertices"]
+            normals = mesh["normals"]
+            edges = mesh["edges"]
+            tree = HGraph()
+            tree.build_single_hgraph(
+                Data(x=torch.cat([vertices, normals], dim=1), edge_index=edges)
+            )
+            self.embds = self.model(
+                torch.cat([vertices, normals], dim=1),
+                tree,
+                tree.depth,
+                dist=None,
+                only_embd=True,
+            ).detach()
+
+    def forward(self, idxs):
+        assert self.embds is not None, "Please call compute_embeddings() first!"
+        with torch.no_grad():
+            return self.embds[idxs]
+
 
 class LEHD(nn.Module):
-
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
@@ -50,7 +88,9 @@ class LEHD(nn.Module):
             )
 
         if mode == "train":
-            remaining_capacity = problems[:, 1, 3]
+            remaining_capacity = problems[
+                :, 1, 2
+            ]  # TODO: this is always the full capacity from what I can tell? Look into changing it.
 
             probs = self.decoder(
                 self.encoder(problems, self.capacity),
@@ -79,7 +119,7 @@ class LEHD(nn.Module):
             loss_node = -prob_select_node.type(torch.float64).log().mean()
 
         if mode == "test":
-            remaining_capacity = problems[:, 1, 3]
+            remaining_capacity = problems[:, 1, 2]
 
             if current_step <= 1:
                 self.encoded_nodes = self.encoder(problems, self.capacity)
@@ -124,17 +164,29 @@ class CVRP_Encoder(nn.Module):
         self.model_params = model_params
         embedding_dim = self.model_params["embedding_dim"]
         encoder_layer_num = 1
-        self.embedding = nn.Linear(3, embedding_dim, bias=True)
+        self.embedding = nn.Linear(2, embedding_dim, bias=True)
         self.layers = nn.ModuleList(
             [EncoderLayer(**model_params) for _ in range(encoder_layer_num)]
         )
 
+        # TODO: finish this
+        # self.model = PretrainedGeGnn().to(device)
+        # self.model.precompute()
+        # self.transition_layer = nn.Linear(..., embedding_dim, bias=True)
+
     def forward(self, data_, capacity):
 
-        data = data_.clone().detach()
-        data = data[:, :, :3]
+        # TODO: finish this, probably need to merge both config files
+        # embedded_input = self.model(data_[:, :, 0])
+        # embedded_input = torch.cat((embedded_input, data_[:, :, 1] / capacity), dim=1)
+        # out = self.transition_layer(embedded_input)
 
-        data[:, :, 2] = data[:, :, 2] / capacity
+        # return out
+
+        data = data_.clone().detach()
+        data = data[:, :, :2]
+
+        data[:, :, 1] = data[:, :, 1] / capacity
 
         embedded_input = self.embedding(data)
 

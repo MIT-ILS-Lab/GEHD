@@ -34,7 +34,7 @@ def compute_single_distance(src_idx, city_indices, vertices, faces):
     return distances
 
 
-def OneRowSolution_to_TwoRow(solution):
+def transform_solution(solution):
     """
     Converts a one-row solution format to a two-row format with nodes and flags.
 
@@ -77,9 +77,6 @@ def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0) -> dict:
     mesh = trimesh.load_mesh(mesh_path)
     vertices = np.array(mesh.vertices, dtype=np.float32)
     faces = np.array(mesh.faces, dtype=np.int32)
-
-    # Initialize geodesic algorithm
-    geoalg = geodesic.PyGeodesicAlgorithmExact(vertices, faces)
 
     # Select depot (using vertex closest to the centroid)
     centroid = mesh.centroid
@@ -171,9 +168,7 @@ def get_problem(
     return {"problem": problem, "demand": demand, "capacity": capacity}
 
 
-def get_solution(
-    mesh_city: dict, problem: dict, max_runtime: int, use_padding: bool = False
-) -> dict:
+def get_solution(mesh_city: dict, problem: dict, max_runtime: int) -> dict:
     """Solves the CVRP using PyVRP with precomputed geodesic distances."""
     problem_indices = problem["problem"]
 
@@ -221,10 +216,11 @@ def get_solution(
     res_dict["distance"] = res_dict["distance"] / 1000
 
     # Convert solution back into the city space
-    solution = [problem["problem"][idx] for idx in res_dict["solution"]]
+    # solution = [problem["problem"][idx] for idx in res_dict["solution"]]
+    solution = res_dict["solution"]
 
     # Add node_flag format
-    res_dict["node_flag"] = OneRowSolution_to_TwoRow(solution)
+    res_dict["node_flag"] = transform_solution(solution)
 
     return res_dict
 
@@ -318,7 +314,7 @@ def write_mesh_cvrp_shard_file(
                     chunksize=max(1, num_problems // os.cpu_count()),
                 ),
                 total=num_problems,
-                desc="Solving problems",
+                desc="Solving problem instances",
             )
         )
 
@@ -330,20 +326,24 @@ def write_mesh_cvrp_shard_file(
     logging.info("Saving problem...")
     with h5py.File(filename, "a") as hf:
         hf.create_dataset(
-            "problems", data=np.array([result["problem"] for result in results])
+            "problems",
+            data=np.array([result["problem"] for result in results], dtype=np.int32),
         )
         hf.create_dataset(
-            "demands", data=np.array([result["demand"] for result in results])
+            "demands",
+            data=np.array([result["demand"] for result in results], dtype=np.float32),
         )
         hf.create_dataset(
-            "capacities", data=np.array([result["capacity"] for result in results])
+            "capacities",
+            data=np.array([result["capacity"] for result in results], dtype=np.int32),
         )
         hf.create_dataset(
-            "distances", data=np.array([result["distance"] for result in results])
+            "distances",
+            data=np.array([result["distance"] for result in results], dtype=np.float32),
         )
         hf.create_dataset(
             "node_flags",
-            data=np.array([result["node_flag"] for result in results]),
+            data=np.array([result["node_flag"] for result in results], dtype=np.int32),
         )
 
     logging.info(f"Successfully saved {num_problems} problems to {filename}")

@@ -45,8 +45,8 @@ data:
 
     # environment
     env:
-      data_path: "main_model/cvrp_data/vrp100_hgs_train_100w.txt"
-      sub_path: true
+      data_path: "main_model/disk/mesh_cvrp_data.h5"
+      sub_path: false
 
     # others
     disable: false
@@ -62,7 +62,7 @@ data:
 
     # environment
     env:
-      data_path: "main_model/cvrp_data/vrp100_test_lkh.txt"
+      data_path: "main_model/disk/mesh_cvrp_data.h5"
       sub_path: false
 
     # others
