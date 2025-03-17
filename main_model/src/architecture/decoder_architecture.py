@@ -8,18 +8,19 @@ from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
 
 class PretrainedGeGnn(nn.Module):
-    def __init__(self, ckpt_path, config):
+    def __init__(self, config):
         super(PretrainedGeGnn, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = GraphUNet(
             config["in_channels"], config["hidden_channels"], config["out_channels"]
         ).to(self.device)
         self.embds = None
-        ckpt = torch.load(ckpt_path, map_location=self.device)
+        ckpt = torch.load(config["ckp_path"], map_location=self.device)
         self.model.load_state_dict(ckpt["model_dict"])
+        self.mesh_path = config["mesh_path"]
 
-    def compute_embeddings(self, mesh_path):
-        mesh = read_mesh(mesh_path, device=self.device)
+    def compute_embeddings(self):
+        mesh = read_mesh(self.mesh_path, device=self.device)
         with torch.no_grad():
             vertices = mesh["vertices"]
             normals = mesh["normals"]
@@ -38,6 +39,7 @@ class PretrainedGeGnn(nn.Module):
 
     def forward(self, idxs):
         assert self.embds is not None, "Please call compute_embeddings() first!"
+        assert idxs.dtype == torch.int64, "Please make sure idxs has type int64"
         with torch.no_grad():
             return self.embds[idxs]
 
@@ -46,8 +48,8 @@ class LEHD(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
-        self.encoder = CVRP_Encoder(**model_params)
-        self.decoder = CVRP_Decoder(**model_params)
+        self.encoder = Encoder(**model_params)
+        self.decoder = Decoder(**model_params)
 
         self.encoded_nodes = None
 
@@ -89,7 +91,7 @@ class LEHD(nn.Module):
 
         if mode == "train":
             remaining_capacity = problems[
-                :, 1, 2
+                :, 1, 3
             ]  # TODO: this is always the full capacity from what I can tell? Look into changing it.
 
             probs = self.decoder(
@@ -158,90 +160,34 @@ class LEHD(nn.Module):
         )
 
 
-class CVRP_Encoder(nn.Module):
+class Encoder(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         embedding_dim = self.model_params["embedding_dim"]
-        encoder_layer_num = 1
-        self.embedding = nn.Linear(2, embedding_dim, bias=True)
-        self.layers = nn.ModuleList(
-            [EncoderLayer(**model_params) for _ in range(encoder_layer_num)]
+
+        self.pretrained_gegnn = PretrainedGeGnn(
+            self.model_params["pretrained_encoder"]
+        ).to(self.device)
+        self.pretrained_gegnn.compute_embeddings()
+        self.transition_layer = nn.Linear(
+            self.model_params["pretrained_encoder"]["out_channels"] + 1,
+            embedding_dim,
+            bias=True,
         )
 
-        # TODO: finish this
-        # self.model = PretrainedGeGnn().to(device)
-        # self.model.precompute()
-        # self.transition_layer = nn.Linear(..., embedding_dim, bias=True)
-
     def forward(self, data_, capacity):
+        embedded_input = self.pretrained_gegnn(data_[:, :, 1].to(torch.int64))
+        embedded_input = torch.cat(
+            (embedded_input, data_[:, :, 2].unsqueeze(-1) / capacity), dim=2
+        )
+        out = self.transition_layer(embedded_input)
 
-        # TODO: finish this, probably need to merge both config files
-        # embedded_input = self.model(data_[:, :, 0])
-        # embedded_input = torch.cat((embedded_input, data_[:, :, 1] / capacity), dim=1)
-        # out = self.transition_layer(embedded_input)
-
-        # return out
-
-        data = data_.clone().detach()
-        data = data[:, :, :2]
-
-        data[:, :, 1] = data[:, :, 1] / capacity
-
-        embedded_input = self.embedding(data)
-
-        out = embedded_input  # [B*(V-1), problem_size - current_step +2, embedding_dim]
-
-        layer_count = 0
-        for layer in self.layers:
-            out = layer(out)
-            layer_count += 1
         return out
 
 
-class EncoderLayer(nn.Module):
-    def __init__(self, **model_params):
-        super().__init__()
-        self.model_params = model_params
-        embedding_dim = self.model_params["embedding_dim"]
-        head_num = self.model_params["head_num"]
-        qkv_dim = self.model_params["qkv_dim"]
-
-        self.Wq = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
-
-        self.feedForward = Feed_Forward_Module(**model_params)
-
-    def forward(self, input1):
-
-        head_num = self.model_params["head_num"]
-
-        q = reshape_by_heads(self.Wq(input1), head_num=head_num)
-        k = reshape_by_heads(self.Wk(input1), head_num=head_num)
-        v = reshape_by_heads(self.Wv(input1), head_num=head_num)
-
-        out_concat = multi_head_attention(q, k, v)  # shape: (B, n, head_num*key_dim)
-
-        multi_head_out = self.multi_head_combine(
-            out_concat
-        )  # shape: (B, n, embedding_dim)
-
-        out1 = input1 + multi_head_out
-        out2 = self.feedForward(out1)
-
-        out3 = out1 + out2
-        return out3
-        # shape: (batch, problem, EMBEDDING_DIM)
-
-
-########################################
-# DECODER
-########################################
-
-
-class CVRP_Decoder(nn.Module):
+class Decoder(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params

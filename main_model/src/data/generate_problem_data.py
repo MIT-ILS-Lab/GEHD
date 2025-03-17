@@ -383,6 +383,7 @@ def access_mesh_cvrp_data(filename: str, problem_index: int = 0) -> dict:
 
 
 if __name__ == "__main__":
+    # TODO: Sync this mesh path with the actual path in the architecture/ config file
     mesh_path = "main_model/disk/meshes/sphere.obj"
     num_problems = 2
     problem_size = 5

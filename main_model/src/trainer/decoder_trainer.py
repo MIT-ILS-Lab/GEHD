@@ -121,6 +121,7 @@ class LEHDTrainer(Solver):
             current_capacity[is_depot] = capacities[is_depot]
 
             # Get demands of selected nodes
+            # TODO: Check this if it works
             selected_demands = torch.gather(
                 problems[:, :, 2], 1, selected_teacher.unsqueeze(1)
             ).squeeze(1)
@@ -302,7 +303,7 @@ class LEHDTrainer(Solver):
         total_distance = torch.zeros(batch_size, device=self.device)
 
         # Get the dataset to access the geodesic matrix
-        dataset = self.train_loader.dataset
+        dataset = self.test_loader.dataset
         geodesic_matrix = dataset.geodesic_matrix
 
         # Initialize current position as depot (index 0)

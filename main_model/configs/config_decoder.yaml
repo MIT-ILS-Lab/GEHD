@@ -75,3 +75,10 @@ model:
   qkv_dim: 16
   head_num: 8
   ff_hidden_dim: 512
+
+  pretrained_encoder:
+    in_channels: 6
+    hidden_channels: 256
+    out_channels: 256
+    ckp_path: "main_model/logs/encoder/checkpoints/00500.solver.tar"
+    mesh_path: "main_model/disk/meshes/sphere.obj"

@@ -89,6 +89,9 @@ class LEHDDataset(Dataset):
         # Get problem indices
         problem_indices = self.raw_data_problems[idx]
 
+        # Get true indices from mesh city
+        problem_true_indices = self.city_indices[problem_indices]
+
         # Get node coordinates from mesh city using problem indices
         # nodes = self.city[problem_indices]
 
@@ -101,6 +104,7 @@ class LEHDDataset(Dataset):
         problem = torch.cat(
             (
                 problem_indices.unsqueeze(-1),
+                problem_true_indices.unsqueeze(-1),
                 demand.unsqueeze(-1),
                 capacity_expanded.unsqueeze(-1),
             ),
