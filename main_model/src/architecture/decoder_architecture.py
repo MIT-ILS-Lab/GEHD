@@ -7,43 +7,6 @@ from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
 
-class PretrainedGeGnn(nn.Module):
-    def __init__(self, config):
-        super(PretrainedGeGnn, self).__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = GraphUNet(
-            config["in_channels"], config["hidden_channels"], config["out_channels"]
-        ).to(self.device)
-        self.embds = None
-        ckpt = torch.load(config["ckp_path"], map_location=self.device)
-        self.model.load_state_dict(ckpt["model_dict"])
-        self.mesh_path = config["mesh_path"]
-
-    def compute_embeddings(self):
-        mesh = read_mesh(self.mesh_path)
-        with torch.no_grad():
-            vertices = mesh["vertices"].to(self.device)
-            normals = mesh["normals"].to(self.device)
-            edges = mesh["edges"].to(self.device)
-            tree = HGraph()
-            tree.build_single_hgraph(
-                Data(x=torch.cat([vertices, normals], dim=1), edge_index=edges)
-            )
-            self.embds = self.model(
-                torch.cat([vertices, normals], dim=1),
-                tree,
-                tree.depth,
-                dist=None,
-                only_embd=True,
-            ).detach()
-
-    def forward(self, idxs):
-        assert self.embds is not None, "Please call compute_embeddings() first!"
-        assert idxs.dtype == torch.int64, "Please make sure idxs has type int64"
-        with torch.no_grad():
-            return self.embds[idxs]
-
-
 class LEHD(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
@@ -162,6 +125,49 @@ class LEHD(nn.Module):
             selected_flag_teacher,
             selected_flag_student,
         )
+
+
+class PretrainedGeGnn(nn.Module):
+    def __init__(self, config):
+        super(PretrainedGeGnn, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = GraphUNet(
+            config["in_channels"], config["hidden_channels"], config["out_channels"]
+        ).to(self.device)
+        self.embds = None
+        ckpt = torch.load(config["ckp_path"], map_location=self.device)
+        self.model.load_state_dict(ckpt["model_dict"])
+        self.mesh_path = config["mesh_path"]
+
+        # Freeze parameters after loading
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+    def compute_embeddings(self):
+        mesh = read_mesh(self.mesh_path)
+        # No need for with torch.no_grad() if parameters are frozen
+        vertices = mesh["vertices"].to(self.device)
+        normals = mesh["normals"].to(self.device)
+        edges = mesh["edges"].to(self.device)
+        tree = HGraph()
+        tree.build_single_hgraph(
+            Data(x=torch.cat([vertices, normals], dim=1), edge_index=edges)
+        )
+        self.embds = self.model(
+            torch.cat([vertices, normals], dim=1),
+            tree,
+            tree.depth,
+            dist=None,
+            only_embd=True,
+        )
+        # Explicitly detach embeddings from computation graph
+        self.embds = self.embds.detach()
+
+    def forward(self, idxs):
+        assert self.embds is not None, "Please call compute_embeddings() first!"
+        assert idxs.dtype == torch.int64, "Please make sure idxs has type int64"
+        # No need for with torch.no_grad() if parameters are frozen
+        return self.embds[idxs]
 
 
 class Encoder(nn.Module):

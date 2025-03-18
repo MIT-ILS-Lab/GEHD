@@ -249,7 +249,6 @@ class Solver:
     def test_epoch(self, epoch, pbar):
         self.model.eval()
         test_tracker = AverageTracker()
-        # test_err_distribution = []
         rng = range(len(self.test_loader))
 
         for it in tqdm(rng, ncols=80, leave=False, disable=self.disable_tqdm):
@@ -257,7 +256,8 @@ class Solver:
             batch = self.test_iter.__next__()
             batch["iter_num"] = it
             batch["epoch"] = epoch
-            output = self.test_step(batch)
+            with torch.no_grad():
+                output = self.test_step(batch)
 
             # track the averaged tensors
             test_tracker.update(output)
