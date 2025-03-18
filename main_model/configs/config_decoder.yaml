@@ -46,7 +46,7 @@ data:
     # environment
     env:
       data_path: "main_model/disk/mesh_cvrp_data.h5"
-      sub_path: false
+      sub_path: true
 
     # others
     disable: false

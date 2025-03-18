@@ -7,6 +7,7 @@ import logging
 import numpy as np
 from tqdm import tqdm
 import trimesh
+import multiprocessing as mp
 
 from pygeodesic import geodesic
 from pyvrp import Model
@@ -24,14 +25,68 @@ logging.basicConfig(
     ],
 )
 
+_geoalg = None
+_source_indices = None
 
-def compute_single_distance(src_idx, city_indices, vertices, faces):
-    """Compute geodesic distances from a single source to all targets"""
-    geoalg = geodesic.PyGeodesicAlgorithmExact(vertices, faces)
-    source_indices = np.array([src_idx])
-    target_indices = city_indices
-    distances, _ = geoalg.geodesicDistances(source_indices, target_indices)
-    return distances
+
+def init_worker(vertices, faces, source_indices):
+    """Initialize the worker process with the geodesic algorithm."""
+    global _geoalg, _source_indices
+    from pygeodesic import (
+        geodesic,
+    )  # Import inside the function to ensure it's imported in the worker process
+
+    _geoalg = geodesic.PyGeodesicAlgorithmExact(vertices, faces)
+    _source_indices = source_indices
+
+
+def worker_function(i):
+    """Worker function that uses the pre-initialized geodesic algorithm."""
+    global _geoalg, _source_indices
+    index_arr = np.array([_source_indices[i]])
+    distances = np.array(_geoalg.geodesicDistances(index_arr, _source_indices))[0]
+    return i, distances
+
+
+def compute_geodesic_distances_parallel(
+    vertices, faces, source_indices, num_processes=None
+):
+    """Compute geodesic distances using parallel processing."""
+    # Set default number of processes
+    if num_processes is None:
+        num_processes = mp.cpu_count()
+
+    # Create empty matrix to store results
+    geodesic_mat = np.zeros((len(source_indices), len(source_indices)))
+
+    worker_iteration = [i for i in range(len(source_indices))]
+
+    start_time = time.time()
+    # Create a pool of workers with initialization
+    with mp.Pool(
+        processes=num_processes,
+        initializer=init_worker,
+        initargs=(vertices, faces, source_indices),
+    ) as pool:
+        # Use imap with tqdm to show progress
+        results = list(
+            tqdm(
+                pool.imap(worker_function, worker_iteration),
+                total=len(source_indices),
+                desc="Computing geodesic distances",
+            )
+        )
+
+    # Fill the matrix with results
+    for i, distances in results:
+        geodesic_mat[i, :] = distances
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    # add time taken in minutes
+    logging.info(f"Time taken to compute geodesic distances: {elapsed_time/60:.2f}m")
+
+    return geodesic_mat
 
 
 def transform_solution(solution):
@@ -98,28 +153,8 @@ def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0) -> dict:
     # Compute geodesic distances between all points
     logging.info("Computing geodesic distance matrix...")
     geodesic_matrix = np.zeros((len(city_indices), len(city_indices)), dtype=np.float32)
-
-    # Create a partial function with fixed parameters
-    worker_func = partial(
-        compute_single_distance,
-        city_indices=city_indices,
-        vertices=vertices,
-        faces=faces,
-    )
-
-    # Use multiprocessing with context manager for parallel computation
-    with multiprocessing.Pool(processes=os.cpu_count()) as pool:
-        results = list(
-            tqdm(
-                pool.map(worker_func, city_indices),
-                total=len(city_indices),
-                desc="Computing distances",
-            )
-        )
-
-    # Assign results to the geodesic matrix
-    for i, distances in enumerate(results):
-        geodesic_matrix[i] = distances
+    geodesic_matrix = compute_geodesic_distances_parallel(vertices, faces, city_indices)
+    logging.info("Finished computing geodesic distance matrix")
 
     return {
         "mesh": mesh,
@@ -208,7 +243,6 @@ def get_solution(mesh_city: dict, problem: dict, max_runtime: int) -> dict:
                 m.add_edge(frm, to, distance=int(distance * 1000))
 
     # Solve and return solution
-    logging.info(f"Solving CVRP with max runtime of {max_runtime} seconds...")
     res = m.solve(stop=MaxRuntime(max_runtime), display=False)
     res_dict = parse_pyvrp_solution(res.best)
 
@@ -225,19 +259,18 @@ def get_solution(mesh_city: dict, problem: dict, max_runtime: int) -> dict:
     return res_dict
 
 
-def generate_and_solve_mesh_problem(
-    mesh_city,
-    city_size,
-    problem_size,
-    dmd_lower,
-    dmd_upper,
-    cap_lower,
-    cap_upper,
-    max_runtime,
-):
-    """
-    Generates a single mesh-based CVRP problem-solution pair.
-    """
+def generate_and_solve_mesh_problem(args):
+    (
+        mesh_city,
+        city_size,
+        problem_size,
+        dmd_lower,
+        dmd_upper,
+        cap_lower,
+        cap_upper,
+        max_runtime,
+    ) = args
+
     # Re-seed the RNG in each process
     np.random.seed(None)
 
@@ -251,11 +284,11 @@ def generate_and_solve_mesh_problem(
         "demand": problem["demand"],
         "capacity": problem["capacity"],
         "distance": solution["distance"],
-        "node_flag": solution["node_flag"],  # Added node_flag
+        "node_flag": solution["node_flag"],
     }
 
 
-def write_mesh_cvrp_shard_file(
+def produce_problem_instances(
     mesh_path: str,
     num_problems: int,
     problem_size: int,
@@ -308,7 +341,7 @@ def write_mesh_cvrp_shard_file(
     with multiprocessing.Pool(processes=os.cpu_count()) as pool:
         results = list(
             tqdm(
-                pool.starmap(
+                pool.imap(
                     generate_and_solve_mesh_problem,
                     args_list,
                     chunksize=max(1, num_problems // os.cpu_count()),
@@ -320,7 +353,9 @@ def write_mesh_cvrp_shard_file(
 
     end_time = time.time()
     elapsed_time = end_time - start_time
-    logging.info(f"Time taken to generate {num_problems} problems: {elapsed_time:.2f}s")
+    logging.info(
+        f"Time taken to generate {num_problems} problems: {elapsed_time/60:.2f}m"
+    )
 
     # Save problem-solution data to HDF5 file
     logging.info("Saving problem...")
@@ -385,26 +420,45 @@ def access_mesh_cvrp_data(filename: str, problem_index: int = 0) -> dict:
 if __name__ == "__main__":
     # TODO: Sync this mesh path with the actual path in the architecture/ config file
     mesh_path = "main_model/disk/meshes/sphere.obj"
-    num_problems = 2
-    problem_size = 5
-    filename = "main_model/disk/mesh_cvrp_data.h5"
+    filename_train = "main_model/disk/mesh_cvrp_data_train.h5"
+    filename_test = "main_model/disk/mesh_cvrp_data_test.h5"
+    num_problems_train = 10
+    num_problems_test = 10
+    problem_size = 10
+    num_customers = 100
 
-    # Generate problems
-    write_mesh_cvrp_shard_file(
+    # TODO: need to hardcode the depot location
+
+    # Generate training problems
+    produce_problem_instances(
         mesh_path=mesh_path,
-        num_problems=num_problems,
+        num_problems=num_problems_train,
         problem_size=problem_size,
-        filename=filename,
+        filename=filename_train,
         dmd_lower=1,
         dmd_upper=9,
         cap_lower=50,
         cap_upper=50,
         max_runtime=5,
-        num_customers=100,
+        num_customers=num_customers,  # Sample all customers
+    )
+
+    # Generate testing problems
+    produce_problem_instances(
+        mesh_path=mesh_path,
+        num_problems=num_problems_test,
+        problem_size=problem_size,
+        filename=filename_test,
+        dmd_lower=1,
+        dmd_upper=9,
+        cap_lower=50,
+        cap_upper=50,
+        max_runtime=5,
+        num_customers=num_customers,  # Sample all customers
     )
 
     # Access and visualize a problem
-    data = access_mesh_cvrp_data(filename, 0)
+    data = access_mesh_cvrp_data(filename_train, 0)
     print(f"Problem size: {len(data['problem'])}")
     print(f"Solution distance: {data['distance']}")
     print(f"Node-flag format: {data['node_flag']}")
