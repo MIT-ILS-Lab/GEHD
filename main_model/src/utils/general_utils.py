@@ -98,7 +98,7 @@ def parse_pyvrp_solution(pyvrp_solution: Solution):
     }
 
 
-def read_mesh(path, to_tensor=True, device=torch.device("cpu")):
+def read_mesh(path, to_tensor=True):
     mesh = trimesh.load(path)
     vertices = mesh.vertices
     edges = mesh.edges_unique
@@ -113,12 +113,12 @@ def read_mesh(path, to_tensor=True, device=torch.device("cpu")):
     face_areas = mesh.area_faces
 
     if to_tensor:
-        vertices = torch.from_numpy(vertices).float().to(device)
-        edges = torch.from_numpy(edges).long().to(device)
-        normals = torch.from_numpy(np.array(normals)).float().to(device)
-        faces = torch.from_numpy(faces).long().to(device)
-        face_normals = torch.from_numpy(np.array(face_normals)).float().to(device)
-        face_areas = torch.from_numpy(np.array(face_areas)).float().to(device)
+        vertices = torch.from_numpy(vertices).float()
+        edges = torch.from_numpy(edges).long()
+        normals = torch.from_numpy(np.array(normals)).float()
+        faces = torch.from_numpy(faces).long()
+        face_normals = torch.from_numpy(np.array(face_normals)).float()
+        face_areas = torch.from_numpy(np.array(face_areas)).float()
 
     return {
         "vertices": vertices,

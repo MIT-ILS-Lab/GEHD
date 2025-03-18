@@ -112,7 +112,7 @@ def transform_solution(solution):
     return node_flag
 
 
-def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0) -> dict:
+def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0):
     """
     Generates a city for the CVRP with a single fixed depot on a trimesh.
 
@@ -123,6 +123,7 @@ def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0) -> dict:
 
     Returns:
         A dictionary containing mesh data and sampled points
+        The city size (number of customers + depot)
     """
     # Set the seed for reproducibility
     np.random.seed(seed)
@@ -143,8 +144,14 @@ def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0) -> dict:
     available_indices = available_indices[
         available_indices != depot_idx
     ]  # Exclude depot
-    customer_indices = np.random.choice(available_indices, num_customers, replace=False)
-    logging.info(f"Sampled {num_customers} customer locations from mesh vertices")
+
+    if (num_customers == -1) or (num_customers > len(available_indices)):
+        city_size = len(available_indices)
+    else:
+        city_size = num_customers
+
+    customer_indices = np.random.choice(available_indices, city_size, replace=False)
+    logging.info(f"Sampled {city_size} customer locations from mesh vertices")
 
     # Combine depot and customers
     city_indices = np.concatenate([[depot_idx], customer_indices])
@@ -163,7 +170,7 @@ def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0) -> dict:
         "city": city,
         "city_indices": city_indices,
         "geodesic_matrix": geodesic_matrix,
-    }
+    }, city_size
 
 
 def get_problem(
@@ -307,8 +314,7 @@ def produce_problem_instances(
 
     # Generate the mesh city once
     logging.info(f"Generating mesh city with {num_customers} customers...")
-    mesh_city = get_mesh_city(mesh_path, num_customers)
-    city_size = num_customers  # Exclude depot
+    mesh_city, city_size = get_mesh_city(mesh_path, num_customers)
 
     # Save the mesh data
     logging.info(f"Saving mesh data to {filename}...")
@@ -420,12 +426,12 @@ def access_mesh_cvrp_data(filename: str, problem_index: int = 0) -> dict:
 if __name__ == "__main__":
     # TODO: Sync this mesh path with the actual path in the architecture/ config file
     mesh_path = "main_model/disk/meshes/sphere.obj"
-    filename_train = "main_model/disk/mesh_cvrp_data_train.h5"
-    filename_test = "main_model/disk/mesh_cvrp_data_test.h5"
-    num_problems_train = 10
-    num_problems_test = 10
-    problem_size = 10
-    num_customers = 100
+    filename_train = "main_model/disk/problems/mesh_cvrp_data_train.h5"
+    filename_test = "main_model/disk/problems/mesh_cvrp_data_test.h5"
+    num_problems_train = 1000
+    num_problems_test = 100
+    problem_size = 100
+    num_customers = 5000
 
     # TODO: need to hardcode the depot location
 

@@ -23,10 +23,10 @@ class LEHDTrainer(Solver):
 
     def get_model(self, config):
         # Create and return the LEHD model
-        return LEHD(**config)
+        return LEHD(**config).to(self.device)
 
     def get_dataset(self, config):
-        return get_dataset(config, self.device)
+        return get_dataset(config)
 
     def get_dataloader(self, config):
         # Override to use custom batch sampler
@@ -59,9 +59,9 @@ class LEHDTrainer(Solver):
 
     def train_step(self, batch):
         # Extract data from batch
-        problems = batch["problems"]
-        solutions = batch["solutions"]
-        capacities = batch["capacities"].float()
+        problems = batch["problems"].to(self.device)
+        solutions = batch["solutions"].to(self.device)
+        capacities = batch["capacities"].float().to(self.device)
 
         # Initialize state tracking
         batch_size = problems.size(0)
@@ -70,16 +70,16 @@ class LEHDTrainer(Solver):
         # Initialize selected node lists and flags
         selected_node_list = torch.zeros(
             (batch_size, 0), dtype=torch.long, device=self.device
-        )
+        ).to(self.device)
         selected_teacher_flag = torch.zeros(
             (batch_size, 0), dtype=torch.long, device=self.device
-        )
+        ).to(self.device)
         selected_student_list = torch.zeros(
             (batch_size, 0), dtype=torch.long, device=self.device
-        )
+        ).to(self.device)
         selected_student_flag = torch.zeros(
             (batch_size, 0), dtype=torch.long, device=self.device
-        )
+        ).to(self.device)
 
         # Track current capacity
         current_capacity = capacities.clone()
@@ -97,7 +97,6 @@ class LEHDTrainer(Solver):
                 selected_flag_student = selected_flag_teacher.clone()
                 loss_mean = torch.tensor(0, device=self.device)
             else:
-                # Use model to predict next node
                 (
                     loss_node,
                     selected_teacher,
@@ -109,7 +108,7 @@ class LEHDTrainer(Solver):
                     selected_node_list,
                     solutions,
                     current_step,
-                    raw_data_capacity=capacities,
+                    capacities,
                     mode="train",
                 )
 
@@ -159,9 +158,9 @@ class LEHDTrainer(Solver):
 
     def test_step(self, batch):
         # Extract data from batch
-        problems = batch["problems"]
-        solutions = batch["solutions"]
-        capacities = batch["capacities"].float()
+        problems = batch["problems"].to(self.device)
+        solutions = batch["solutions"].to(self.device)
+        capacities = batch["capacities"].float().to(self.device)
 
         # Initialize state tracking
         batch_size = problems.size(0)
@@ -209,7 +208,7 @@ class LEHDTrainer(Solver):
                     selected_node_list,
                     solutions,
                     current_step,
-                    raw_data_capacity=capacities,
+                    capacities,
                     mode="test",
                 )
 

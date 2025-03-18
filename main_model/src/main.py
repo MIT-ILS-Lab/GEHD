@@ -5,6 +5,14 @@ from main_model.src.utils.config import load_config, parse_args
 from main_model.src.trainer.encoder_trainer import GeGnnTrainer
 from main_model.src.trainer.decoder_trainer import LEHDTrainer
 
+# Set the type of model to run, either "encoder" or "decoder"
+TYPE = "decoder"
+
+
+####################################################################################################
+##### Main ########################################################################################
+####################################################################################################
+
 # Configure the logger
 logging.basicConfig(
     level=logging.INFO,  # Set the logging level
@@ -21,9 +29,6 @@ paths = {
     "encoder": "main_model/configs/config_encoder.yaml",
     "decoder": "main_model/configs/config_decoder.yaml",
 }
-
-# Set the type of model to run, either "encoder" or "decoder"
-TYPE = "decoder"
 
 if __name__ == "__main__":
     assert (

@@ -20,11 +20,11 @@ class PretrainedGeGnn(nn.Module):
         self.mesh_path = config["mesh_path"]
 
     def compute_embeddings(self):
-        mesh = read_mesh(self.mesh_path, device=self.device)
+        mesh = read_mesh(self.mesh_path)
         with torch.no_grad():
-            vertices = mesh["vertices"]
-            normals = mesh["normals"]
-            edges = mesh["edges"]
+            vertices = mesh["vertices"].to(self.device)
+            normals = mesh["normals"].to(self.device)
+            edges = mesh["edges"].to(self.device)
             tree = HGraph()
             tree.build_single_hgraph(
                 Data(x=torch.cat([vertices, normals], dim=1), edge_index=edges)
@@ -51,6 +51,8 @@ class LEHD(nn.Module):
         self.encoder = Encoder(**model_params)
         self.decoder = Decoder(**model_params)
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self.encoded_nodes = None
 
     def forward(
@@ -59,11 +61,11 @@ class LEHD(nn.Module):
         selected_node_list,
         solution,
         current_step,
-        raw_data_capacity=None,
+        capacities=None,
         mode="train",
     ):
         # solution's shape : [B, V]
-        self.capacity = raw_data_capacity.ravel()[0].item()
+        self.capacity = capacities.ravel()[0].item()
         batch_size = problems.shape[0]
         problem_size = problems.shape[1]
         split_line = problem_size - 1
@@ -75,7 +77,7 @@ class LEHD(nn.Module):
             )  # Nodes with an index greater than customer_num are via depot
             not_via_depot_student_ = selected_node_student_ < split_line_
 
-            selected_flag_student_ = torch.zeros(batch_size_, dtype=torch.int)
+            selected_flag_student_ = torch.zeros(batch_size_, dtype=torch.int, device=self.device)
             selected_flag_student_[is_via_depot_student_] = 1
             selected_node_student_[is_via_depot_student_] = (
                 selected_node_student_[is_via_depot_student_] - split_line_ + 1
@@ -94,8 +96,10 @@ class LEHD(nn.Module):
                 :, 1, 3
             ]  # TODO: this is always the full capacity from what I can tell? Look into changing it.
 
+            encoder_output = self.encoder(problems, self.capacity)
+
             probs = self.decoder(
-                self.encoder(problems, self.capacity),
+                encoder_output,
                 selected_node_list,
                 self.capacity,
                 remaining_capacity,
@@ -136,7 +140,7 @@ class LEHD(nn.Module):
             selected_node_student = probs.argmax(dim=1)  # shape: B
             is_via_depot_student = selected_node_student >= split_line
             not_via_depot_student = selected_node_student < split_line
-            selected_flag_student = torch.zeros(batch_size, dtype=torch.int)
+            selected_flag_student = torch.zeros(batch_size, dtype=torch.int, device=self.device)
             selected_flag_student[is_via_depot_student] = 1
             selected_node_student[is_via_depot_student] = (
                 selected_node_student[is_via_depot_student] - split_line + 1
@@ -206,8 +210,9 @@ class Decoder(nn.Module):
         )
         self.Linear_final = nn.Linear(embedding_dim, 2, bias=True)
 
-    def _get_new_data(self, data, selected_node_list, prob_size, B_V):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    def _get_new_data(self, data, selected_node_list, prob_size, B_V):
         list = selected_node_list
 
         new_list = torch.arange(prob_size)[None, :].repeat(B_V, 1)
@@ -242,7 +247,7 @@ class Decoder(nn.Module):
             B_V, new_data_len, emb_dim
         )
 
-        return new_data_
+        return new_data_.to(self.device)
 
     def _get_encoding(self, encoded_nodes, node_index_to_pick):
 
@@ -325,11 +330,10 @@ class Decoder(nn.Module):
         index_small = torch.le(props, 1e-5)
         props_clone = props.clone()
         props_clone[index_small] = props_clone[index_small] + torch.tensor(
-            1e-7, dtype=props_clone[index_small].dtype
-        )
+            1e-7, dtype=props_clone[index_small].dtype, device=self.device)
         props = props_clone
 
-        new_props = torch.zeros(batch_size_V, 2 * (problem_size))
+        new_props = torch.zeros(batch_size_V, 2 * (problem_size), device=self.device)
 
         # The function of the following part is to fill the probability of props into the new_props,
         index_1_ = torch.arange(batch_size_V, dtype=torch.long)[:, None].repeat(

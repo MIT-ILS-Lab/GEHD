@@ -60,17 +60,12 @@ class InfiniteLEHDBatchSampler:
 
 class LEHDDataset(Dataset):
     def __init__(
-        self, data_path, mode="train", episodes=100, sub_path=False, device=None
+        self, data_path, mode="train", episodes=100, sub_path=False
     ):
         self.data_path = data_path
         self.mode = mode
         self.episodes = episodes
         self.sub_path = sub_path
-        self.device = (
-            device
-            if device
-            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
 
         # Load the raw data
         self.load_raw_data(self.episodes)
@@ -117,25 +112,25 @@ class LEHDDataset(Dataset):
                 problem, solution, fixed_length=fixed_length
             )
 
-        return {"problem": problem, "solution": solution, "capacity": capacity}
+        return {
+            "problem": problem,
+            "solution": solution,
+            "capacity": capacity,
+        }
 
     def load_mesh_data(self):
         """Load the mesh data to get node coordinates"""
         with h5py.File(self.data_path, "r") as hf:
             # Load mesh data
-            self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False).to(
-                self.device
-            )
-            self.faces = torch.tensor(hf["faces"][:], requires_grad=False).to(
-                self.device
-            )
-            self.city = torch.tensor(hf["city"][:], requires_grad=False).to(self.device)
+            self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False)
+            self.faces = torch.tensor(hf["faces"][:], requires_grad=False)
+            self.city = torch.tensor(hf["city"][:], requires_grad=False)
             self.city_indices = torch.tensor(
                 hf["city_indices"][:], requires_grad=False
-            ).to(self.device)
+            )
             self.geodesic_matrix = torch.tensor(
                 hf["geodesic_matrix"][:], requires_grad=False
-            ).to(self.device)
+            )
 
         logging.info(f"Loaded mesh data with {len(self.city)} city points")
 
@@ -155,7 +150,10 @@ class LEHDDataset(Dataset):
         with h5py.File(self.data_path, "r") as hf:
             # Determine how many problems to load
             total_problems = len(hf["problems"])
-            num_problems = min(episode, total_problems)
+            if episode == -1:
+                num_problems = total_problems
+            else:
+                num_problems = min(episode, total_problems)
 
             # Initialize lists for data
             self.raw_data_capacity = []
@@ -185,19 +183,19 @@ class LEHDDataset(Dataset):
             # Convert to tensors
             self.raw_data_problems = torch.tensor(
                 self.raw_data_problems, requires_grad=False
-            ).to(self.device)
+            )
             self.raw_data_capacity = torch.tensor(
                 self.raw_data_capacity, requires_grad=False
-            ).to(self.device)
+            )
             self.raw_data_demand = torch.tensor(
                 self.raw_data_demand, requires_grad=False
-            ).to(self.device)
+            )
             self.raw_data_cost = torch.tensor(
                 self.raw_data_cost, requires_grad=False
-            ).to(self.device)
+            )
             self.raw_data_node_flag = torch.tensor(
                 self.raw_data_node_flag, requires_grad=False
-            ).to(self.device)
+            )
 
         logging.info(
             f"Loading {self.mode} dataset done! Loaded {len(self.raw_data_capacity)} problems."
@@ -308,7 +306,7 @@ class LEHDDataset(Dataset):
         visit_depot_num_numpy = visit_depot_num.clone().cpu().numpy()
 
         temp_index = np.dot(visit_depot_num_numpy, temp_tri)
-        temp_index_torch = torch.from_numpy(temp_index).long().to(self.device)
+        temp_index_torch = torch.from_numpy(temp_index).long()
 
         pick_end_with_depot_index = temp_index_torch + first_node_index
         pick_end_with_depot_ = end_with_depot[pick_end_with_depot_index][:, 1]
@@ -428,13 +426,12 @@ def collate_batch(batch):
     return {"problems": problems, "solutions": solutions, "capacities": capacities}
 
 
-def get_dataset(config, device):
+def get_dataset(config):
     # Create dataset
     dataset = LEHDDataset(
         data_path=config["env"]["data_path"],
         episodes=config["episodes"],
         mode=config["mode"],
         sub_path=config["env"]["sub_path"],
-        device=device,
     )
     return dataset, collate_batch
