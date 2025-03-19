@@ -1,9 +1,12 @@
 import logging
 import yaml
+import torch
 
 from main_model.src.utils.config import load_config, parse_args
 from main_model.src.trainer.encoder_trainer import GeGnnTrainer
 from main_model.src.trainer.decoder_trainer import LEHDTrainer
+
+torch.backends.cudnn.benchmark = True
 
 # Set the type of model to run, either "encoder" or "decoder"
 TYPE = "decoder"

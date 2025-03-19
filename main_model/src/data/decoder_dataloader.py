@@ -418,12 +418,18 @@ class LEHDDataset(Dataset):
 
 
 def collate_batch(batch):
-    # Collate function to handle batching of variable-sized problems
     problems = torch.stack([item["problem"] for item in batch])
     solutions = torch.stack([item["solution"] for item in batch])
     capacities = torch.stack([item["capacity"] for item in batch])
 
-    return {"problems": problems, "solutions": solutions, "capacities": capacities}
+    batch_dict = {
+        "problems": problems,
+        "solutions": solutions,
+        "capacities": capacities.float(),
+    }
+
+    return batch_dict
+
 
 
 def get_dataset(config):

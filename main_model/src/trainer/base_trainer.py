@@ -180,7 +180,11 @@ class Solver:
         if len(rng) == 1:
             self.disable_tqdm = True
 
-        for it in tqdm(rng, leave=False, disable=self.disable_tqdm):
+        for it in tqdm(range(len(self.train_loader)),
+                   desc=f"Train Epoch {epoch}",
+                   position=1,
+                   leave=False,
+                   disable=self.disable_tqdm):
             # load data
             batch = self.train_iter.__next__()
             batch["iter_num"] = it
@@ -249,13 +253,22 @@ class Solver:
     def test_epoch(self, epoch, pbar):
         self.model.eval()
         test_tracker = AverageTracker()
-        rng = range(len(self.test_loader))
 
-        for it in tqdm(rng, ncols=80, leave=False, disable=self.disable_tqdm):
+        for it in tqdm(range(len(self.test_loader)),
+                       desc=f"Test Epoch {epoch}",
+                       position=1,  # same inner position as train_epoch
+                       leave=False,
+                       disable=self.disable_tqdm):
             # forward
             batch = self.test_iter.__next__()
             batch["iter_num"] = it
             batch["epoch"] = epoch
+
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
+
             with torch.no_grad():
                 output = self.test_step(batch)
 
@@ -335,7 +348,7 @@ class Solver:
         self.load_checkpoint()
 
         rng = range(self.start_epoch, self.config["solver"]["max_epoch"] + 1)
-        with tqdm(rng, disable=self.disable_tqdm) as pbar:
+        with tqdm(rng, desc="Epoch", position=0, leave=True, disable=self.disable_tqdm) as pbar:
             for epoch in pbar:
                 # training epoch
                 self.train_epoch(epoch, pbar)

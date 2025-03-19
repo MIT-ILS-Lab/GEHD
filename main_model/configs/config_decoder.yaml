@@ -38,7 +38,7 @@ data:
 
     # data loading
     batch_size: 32
-    num_workers: 0
+    num_workers: 4
     episodes: -1    # -1 means all
 
     shuffle: true
@@ -56,7 +56,7 @@ data:
 
     # data loading
     batch_size: 100
-    num_workers: 0
+    num_workers: 4
     episodes: -1    # -1 means all
 
     shuffle: false
