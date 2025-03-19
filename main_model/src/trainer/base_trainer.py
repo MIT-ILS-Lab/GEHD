@@ -34,6 +34,8 @@ class Solver:
 
         self.rank = dist.get_rank() if dist.is_initialized() else 0
 
+        self.backprop = True
+
         if self.slurm_job_name == "JupyterNotebook":
             self.log_wandb = False
         else:
@@ -174,17 +176,20 @@ class Solver:
         train_tracker = AverageTracker()
         rng = range(len(self.train_loader))
 
-        self.optimizer.zero_grad()  # zero grad at the start of accumulation
+        if self.backprop:
+            self.optimizer.zero_grad()  # zero grad at the start of accumulation, TODO: Check this, shouldn't it be the model?
 
         # if rng is 1, don't use tqdm
         if len(rng) == 1:
             self.disable_tqdm = True
 
-        for it in tqdm(range(len(self.train_loader)),
-                   desc=f"Train Epoch {epoch}",
-                   position=1,
-                   leave=False,
-                   disable=self.disable_tqdm):
+        for it in tqdm(
+            range(len(self.train_loader)),
+            desc=f"Train Epoch {epoch}",
+            position=1,
+            leave=False,
+            disable=self.disable_tqdm,
+        ):
             # load data
             batch = self.train_iter.__next__()
             batch["iter_num"] = it
@@ -198,16 +203,21 @@ class Solver:
 
             # forward and backward
             output = self.train_step(batch)
-            loss = output["train/loss"] / self.accumulation_steps
-            loss.backward()
+
+            if self.backprop:
+                loss = output["train/loss"] / self.accumulation_steps
+                loss.backward()
 
             # grad clip
+            # TODO: Check how to clip gradients for not self.backprop
             clip_grad = self.config["solver"]["clip_grad"]
             if clip_grad > 0:
                 nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
 
             # apply the gradient every accumulation_steps
-            if (self.global_step + 1) % self.accumulation_steps == 0:
+            if (
+                (self.global_step + 1) % self.accumulation_steps == 0
+            ) and self.backprop:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
                 if self.accumulation_steps > 1:
@@ -241,7 +251,7 @@ class Solver:
             self.global_step += 1
 
             # Apply gradients if any remain after the loop finishes
-            if self.global_step % self.accumulation_steps != 0:
+            if (self.global_step % self.accumulation_steps != 0) and self.backprop:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
@@ -254,11 +264,13 @@ class Solver:
         self.model.eval()
         test_tracker = AverageTracker()
 
-        for it in tqdm(range(len(self.test_loader)),
-                       desc=f"Test Epoch {epoch}",
-                       position=1,  # same inner position as train_epoch
-                       leave=False,
-                       disable=self.disable_tqdm):
+        for it in tqdm(
+            range(len(self.test_loader)),
+            desc=f"Test Epoch {epoch}",
+            position=1,  # same inner position as train_epoch
+            leave=False,
+            disable=self.disable_tqdm,
+        ):
             # forward
             batch = self.test_iter.__next__()
             batch["iter_num"] = it
@@ -348,7 +360,9 @@ class Solver:
         self.load_checkpoint()
 
         rng = range(self.start_epoch, self.config["solver"]["max_epoch"] + 1)
-        with tqdm(rng, desc="Epoch", position=0, leave=True, disable=self.disable_tqdm) as pbar:
+        with tqdm(
+            rng, desc="Epoch", position=0, leave=True, disable=self.disable_tqdm
+        ) as pbar:
             for epoch in pbar:
                 # training epoch
                 self.train_epoch(epoch, pbar)

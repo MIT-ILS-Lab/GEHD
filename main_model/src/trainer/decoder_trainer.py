@@ -18,6 +18,8 @@ class LEHDTrainer(Solver):
         self.trainer_params = config["data"]["train"]
         self.testing_params = config["data"]["test"]
 
+        self.backprop = False
+
         # Set random seed
         torch.manual_seed(22)
 
@@ -115,6 +117,11 @@ class LEHDTrainer(Solver):
                 )
 
                 loss_mean = loss_node
+
+                # Backpropagate and update model
+                self.model.zero_grad()
+                loss_mean.backward()
+                self.optimizer.step()
 
             # Update capacity based on selection
             # Handle depot returns (capacity refill)
