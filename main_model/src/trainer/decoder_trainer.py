@@ -119,7 +119,7 @@ class LEHDTrainer(Solver):
                 loss_mean = loss_node
 
                 # Backpropagate and update model
-                self.model.zero_grad()
+                self.optimizer.zero_grad()
                 loss_mean.backward()
                 self.optimizer.step()
 
