@@ -34,7 +34,9 @@ class Solver:
 
         self.rank = dist.get_rank() if dist.is_initialized() else 0
 
-        self.backprop = True
+        self.clip_grad = self.config["solver"]["clip_grad"]
+
+        self.batch_backprop = True # Set to False to avoid backpropagation after each step
 
         if self.slurm_job_name == "JupyterNotebook":
             self.log_wandb = False
@@ -92,6 +94,10 @@ class Solver:
 
     def get_embd(self, batch):
         raise NotImplementedError
+
+    def clip_grad_norm(self):
+        if self.clip_grad > 0:
+            nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad)
 
     def config_dataloader(self, disable_train_data=False):
         config_train, config_test = (
@@ -176,7 +182,7 @@ class Solver:
         train_tracker = AverageTracker()
         rng = range(len(self.train_loader))
 
-        if self.backprop:
+        if self.batch_backprop:
             self.optimizer.zero_grad()  # zero grad at the start of accumulation, TODO: Check this, shouldn't it be the model?
 
         # if rng is 1, don't use tqdm
@@ -204,26 +210,18 @@ class Solver:
             # forward and backward
             output = self.train_step(batch)
 
-            if self.backprop:
+            if self.batch_backprop:
                 loss = output["train/loss"] / self.accumulation_steps
                 loss.backward()
-
-            # grad clip
-            # TODO: Check how to clip gradients for not self.backprop
-            clip_grad = self.config["solver"]["clip_grad"]
-            if clip_grad > 0:
-                nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
-
-            # apply the gradient every accumulation_steps
-            if (
-                (self.global_step + 1) % self.accumulation_steps == 0
-            ) and self.backprop:
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-                if self.accumulation_steps > 1:
-                    logging.info(
-                        f"Successfully ran accumulated gradient step at step {self.global_step}"
-                    )
+                # apply the gradient every accumulation_steps
+                if (self.global_step + 1) % self.accumulation_steps == 0:
+                    self.clip_grad_norm()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    if self.accumulation_steps > 1:
+                        logging.info(
+                            f"Successfully ran accumulated gradient step at step {self.global_step}"
+                        )
 
             # track the averaged tensors
             elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
@@ -247,13 +245,17 @@ class Solver:
                     pbar=pbar,
                 )
 
-            train_tracker.log(epoch, summary_writer=self.summary_writer, pbar=pbar)
             self.global_step += 1
 
-            # Apply gradients if any remain after the loop finishes
-            if (self.global_step % self.accumulation_steps != 0) and self.backprop:
-                self.optimizer.step()
-                self.optimizer.zero_grad()
+        # Apply gradients if any remain after the loop finishes
+        if (self.global_step % self.accumulation_steps != 0) and self.batch_backprop:
+            self.clip_grad_norm()
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            if self.accumulation_steps > 1:
+                logging.info(
+                    f"Successfully ran accumulated gradient step at step {self.global_step}"
+                )
 
         if self.rank == 0:
             log_data = train_tracker.average()

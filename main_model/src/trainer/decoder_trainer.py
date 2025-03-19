@@ -1,13 +1,14 @@
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from main_model.src.architecture.decoder_architecture import LEHD
+from main_model.src.trainer.base_trainer import Solver
 from main_model.src.data.decoder_dataloader import (
     LEHDBatchSampler,
     InfiniteLEHDBatchSampler,
     get_dataset,
 )
-from main_model.src.trainer.base_trainer import Solver
 
 
 class LEHDTrainer(Solver):
@@ -18,7 +19,7 @@ class LEHDTrainer(Solver):
         self.trainer_params = config["data"]["train"]
         self.testing_params = config["data"]["test"]
 
-        self.backprop = False
+        self.batch_backprop = False # Set to False to avoid backpropagation after step (do it in the step function)
 
         # Set random seed
         torch.manual_seed(22)
@@ -121,6 +122,9 @@ class LEHDTrainer(Solver):
                 # Backpropagate and update model
                 self.optimizer.zero_grad()
                 loss_mean.backward()
+
+                self.clip_grad_norm()
+
                 self.optimizer.step()
 
             # Update capacity based on selection

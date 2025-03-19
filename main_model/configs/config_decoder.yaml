@@ -5,8 +5,8 @@ solver:
   logdir: "main_model/logs/decoder"
   max_epoch: 40
   test_every_epoch: 1
-  save_every_epoch: 50
-  log_per_iter: 100
+  save_every_epoch: 5
+  log_per_iter: 1
 
   # optimizer
   type: "adamw"
