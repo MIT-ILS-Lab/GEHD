@@ -26,7 +26,7 @@ solver:
   rand_seed: 22
   empty_cache: true
   ckpt: null
-  clip_grad: 1.0
+  clip_grad: 0 # 0 means no clip
 
   # wandb
   wandb:
