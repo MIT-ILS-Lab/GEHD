@@ -40,7 +40,9 @@ class LEHD(nn.Module):
             )  # Nodes with an index greater than customer_num are via depot
             not_via_depot_student_ = selected_node_student_ < split_line_
 
-            selected_flag_student_ = torch.zeros(batch_size_, dtype=torch.int, device=self.device)
+            selected_flag_student_ = torch.zeros(
+                batch_size_, dtype=torch.int, device=self.device
+            )
             selected_flag_student_[is_via_depot_student_] = 1
             selected_node_student_[is_via_depot_student_] = (
                 selected_node_student_[is_via_depot_student_] - split_line_ + 1
@@ -55,9 +57,7 @@ class LEHD(nn.Module):
             )
 
         if mode == "train":
-            remaining_capacity = problems[
-                :, 1, 3
-            ]  # TODO: this is always the full capacity from what I can tell? Look into changing it.
+            remaining_capacity = problems[:, 1, 3]
 
             encoder_output = self.encoder(problems, self.capacity)
 
@@ -103,7 +103,9 @@ class LEHD(nn.Module):
             selected_node_student = probs.argmax(dim=1)  # shape: B
             is_via_depot_student = selected_node_student >= split_line
             not_via_depot_student = selected_node_student < split_line
-            selected_flag_student = torch.zeros(batch_size, dtype=torch.int, device=self.device)
+            selected_flag_student = torch.zeros(
+                batch_size, dtype=torch.int, device=self.device
+            )
             selected_flag_student[is_via_depot_student] = 1
             selected_node_student[is_via_depot_student] = (
                 selected_node_student[is_via_depot_student] - split_line + 1
@@ -336,7 +338,8 @@ class Decoder(nn.Module):
         index_small = torch.le(props, 1e-5)
         props_clone = props.clone()
         props_clone[index_small] = props_clone[index_small] + torch.tensor(
-            1e-7, dtype=props_clone[index_small].dtype, device=self.device)
+            1e-7, dtype=props_clone[index_small].dtype, device=self.device
+        )
         props = props_clone
 
         new_props = torch.zeros(batch_size_V, 2 * (problem_size), device=self.device)

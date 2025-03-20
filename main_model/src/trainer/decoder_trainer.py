@@ -19,7 +19,7 @@ class LEHDTrainer(Solver):
         self.trainer_params = config["data"]["train"]
         self.testing_params = config["data"]["test"]
 
-        self.batch_backprop = False # Set to False to avoid backpropagation after step (do it in the step function)
+        self.batch_backprop = False  # Set to False to avoid backpropagation after step (do it in the step function)
 
         # Set random seed
         torch.manual_seed(22)
@@ -86,9 +86,6 @@ class LEHDTrainer(Solver):
             (batch_size, 0), dtype=torch.long, device=self.device
         )
 
-        # Track current capacity
-        current_capacity = capacities.clone()
-
         loss_list = []
         current_step = 0
 
@@ -102,6 +99,7 @@ class LEHDTrainer(Solver):
                 selected_flag_student = selected_flag_teacher.clone()
                 loss_mean = torch.tensor(0, device=self.device)
             else:
+                # Use model to predict next node
                 (
                     loss_node,
                     selected_teacher,
@@ -122,29 +120,28 @@ class LEHDTrainer(Solver):
                 # Backpropagate and update model
                 self.optimizer.zero_grad()
                 loss_mean.backward()
-
                 self.clip_grad_norm()
-
                 self.optimizer.step()
 
-            # Update capacity based on selection
-            # Handle depot returns (capacity refill)
+            # Update capacity in problems tensor directly
+            # 1. If flag = 1, the vehicle returns to depot and capacity is refilled
             is_depot = selected_flag_teacher == 1
-            current_capacity[is_depot] = capacities[is_depot]
+            problems[is_depot, :, 3] = capacities[is_depot, None]
 
-            # Get demands of selected nodes
-            # TODO: Check this if it works
-            selected_demands = torch.gather(
-                problems[:, :, 2], 1, selected_teacher.unsqueeze(1)
-            ).squeeze(1)
+            # 2. Get demands of selected nodes using gather
+            gather_index = selected_teacher[:, None, None].expand(
+                (len(selected_teacher), 1, 4)
+            )
+            current_node_temp = problems.gather(index=gather_index, dim=1).squeeze(1)
+            selected_demands = current_node_temp[:, 2]
 
-            # Check if capacity is less than demand, refill if needed
-            smaller_ = current_capacity < selected_demands
+            # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
+            smaller_ = problems[:, 0, 3] < selected_demands
             selected_flag_teacher[smaller_] = 1
-            current_capacity[smaller_] = capacities[smaller_]
+            problems[smaller_, :, 3] = capacities[smaller_, None]
 
-            # Subtract demand from capacity
-            current_capacity = current_capacity - selected_demands
+            # 4. Subtract demand from capacity
+            problems[:, :, 3] = problems[:, :, 3] - selected_demands[:, None]
 
             # Update tracking lists
             selected_node_list = torch.cat(

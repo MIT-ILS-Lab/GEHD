@@ -36,7 +36,9 @@ class Solver:
 
         self.clip_grad = self.config["solver"]["clip_grad"]
 
-        self.batch_backprop = True # Set to False to avoid backpropagation after each step
+        self.batch_backprop = (
+            True  # Set to False to avoid backpropagation after each step
+        )
 
         if self.slurm_job_name == "JupyterNotebook":
             self.log_wandb = False
@@ -375,8 +377,8 @@ class Solver:
                 self.summary_writer.add_scalar("train/lr", lr[0], epoch)
 
                 # testing epoch
-                if epoch % self.config["solver"]["test_every_epoch"] == 0:
-                    self.test_epoch(epoch, pbar)
+                # if epoch % self.config["solver"]["test_every_epoch"] == 0:
+                # self.test_epoch(epoch, pbar)
 
                 # checkpoint
                 if epoch % self.config["solver"]["save_every_epoch"] == 0:

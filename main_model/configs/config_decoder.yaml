@@ -9,7 +9,7 @@ solver:
   log_per_iter: 1
 
   # optimizer
-  type: "adamw"
+  type: "adam"
   weight_decay: 0.0
   lr: 1.0e-4
 
@@ -26,7 +26,7 @@ solver:
   rand_seed: 22
   empty_cache: true
   ckpt: null
-  clip_grad: 0 # 0 means no clip
+  clip_grad: 0.0
 
   # wandb
   wandb:
@@ -38,7 +38,7 @@ data:
     mode: "train"
 
     # data loading
-    batch_size: 32
+    batch_size: 8
     num_workers: 4
     episodes: -1    # -1 means all
 
@@ -48,7 +48,6 @@ data:
     env:
       data_path: "main_model/disk/problems/mesh_cvrp_data_train.h5"
       sub_path: true
-
     # others
     disable: false
 
