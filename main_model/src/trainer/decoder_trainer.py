@@ -46,6 +46,7 @@ class LEHDTrainer(Solver):
             dataset_size,
             problem_size,
             params["batch_size"],
+            params["shuffle"],
         )
 
         # Wrap it with the infinite sampler
@@ -118,9 +119,9 @@ class LEHDTrainer(Solver):
                 loss_mean = loss_node
 
                 # Backpropagate and update model
-                self.optimizer.zero_grad()
+                self.model.zero_grad()
                 loss_mean.backward()
-                self.clip_grad_norm()
+                # self.clip_grad_norm()
                 self.optimizer.step()
 
             # Update capacity in problems tensor directly

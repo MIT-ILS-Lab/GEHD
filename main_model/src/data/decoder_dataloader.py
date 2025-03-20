@@ -14,7 +14,9 @@ class LEHDBatchSampler(torch.utils.data.Sampler):
     This ensures all items in a batch have the same sequence length.
     """
 
-    def __init__(self, dataset_size, problem_size, batch_size, drop_last=False):
+    def __init__(
+        self, dataset_size, problem_size, batch_size, shuffle, drop_last=False
+    ):
         self.dataset_size = dataset_size
         self.problem_size = problem_size
         self.batch_size = batch_size
@@ -22,18 +24,23 @@ class LEHDBatchSampler(torch.utils.data.Sampler):
         self.num_batches = dataset_size // batch_size
         if not drop_last and dataset_size % batch_size != 0:
             self.num_batches += 1
+        self.shuffle = shuffle
 
     def __len__(self):
         return self.num_batches
 
     def __iter__(self):
         # Create random indices
-        indices = torch.randperm(self.dataset_size).tolist()
+        if self.shuffle:
+            indices = torch.randperm(self.dataset_size).tolist()
+        else:
+            indices = list(range(self.dataset_size))
 
         # Yield batches
         for i in range(0, self.dataset_size, self.batch_size):
-            batch_indices = indices[i : i + self.batch_size]
+            batch_indices = indices[i : min(i + self.batch_size, self.dataset_size)]
 
+            # TODO: What is this doing?
             if self.drop_last and len(batch_indices) < self.batch_size:
                 continue
 
@@ -59,9 +66,7 @@ class InfiniteLEHDBatchSampler:
 
 
 class LEHDDataset(Dataset):
-    def __init__(
-        self, data_path, mode="train", episodes=100, sub_path=False
-    ):
+    def __init__(self, data_path, mode="train", episodes=100, sub_path=False):
         self.data_path = data_path
         self.mode = mode
         self.episodes = episodes
@@ -71,7 +76,7 @@ class LEHDDataset(Dataset):
         self.load_raw_data(self.episodes)
 
         # Load mesh data for computing node locations
-        self.load_mesh_data()
+        # self.load_mesh_data()
 
     def __len__(self):
         return len(self.raw_data_problems)
@@ -82,10 +87,7 @@ class LEHDDataset(Dataset):
         fixed_length = args[1]
 
         # Get problem indices
-        problem_indices = self.raw_data_problems[idx]
-
-        # Get true indices from mesh city
-        problem_true_indices = self.city_indices[problem_indices]
+        problems = self.raw_data_problems[idx]
 
         # Get node coordinates from mesh city using problem indices
         # nodes = self.city[problem_indices]
@@ -98,8 +100,8 @@ class LEHDDataset(Dataset):
         capacity_expanded = capacity.unsqueeze(0).repeat(solution.shape[0] + 1)
         problem = torch.cat(
             (
-                problem_indices.unsqueeze(-1),
-                problem_true_indices.unsqueeze(-1),
+                problems[:, 0].unsqueeze(-1),
+                problems[:, 1].unsqueeze(-1),
                 demand.unsqueeze(-1),
                 capacity_expanded.unsqueeze(-1),
             ),
@@ -125,9 +127,7 @@ class LEHDDataset(Dataset):
             self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False)
             self.faces = torch.tensor(hf["faces"][:], requires_grad=False)
             self.city = torch.tensor(hf["city"][:], requires_grad=False)
-            self.city_indices = torch.tensor(
-                hf["city_indices"][:], requires_grad=False
-            )
+            self.city_indices = torch.tensor(hf["city_indices"][:], requires_grad=False)
             self.geodesic_matrix = torch.tensor(
                 hf["geodesic_matrix"][:], requires_grad=False
             )
@@ -190,9 +190,7 @@ class LEHDDataset(Dataset):
             self.raw_data_demand = torch.tensor(
                 self.raw_data_demand, requires_grad=False
             )
-            self.raw_data_cost = torch.tensor(
-                self.raw_data_cost, requires_grad=False
-            )
+            self.raw_data_cost = torch.tensor(self.raw_data_cost, requires_grad=False)
             self.raw_data_node_flag = torch.tensor(
                 self.raw_data_node_flag, requires_grad=False
             )
@@ -429,7 +427,6 @@ def collate_batch(batch):
     }
 
     return batch_dict
-
 
 
 def get_dataset(config):

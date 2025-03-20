@@ -428,10 +428,10 @@ if __name__ == "__main__":
     mesh_path = "main_model/disk/meshes/sphere.obj"
     filename_train = "main_model/disk/problems/mesh_cvrp_data_train.h5"
     filename_test = "main_model/disk/problems/mesh_cvrp_data_test.h5"
-    num_problems_train = 10000
+    num_problems_train = 100
     num_problems_test = 100
     problem_size = 100
-    num_customers = 1000
+    num_customers = 100
 
     # TODO: need to hardcode the depot location
 

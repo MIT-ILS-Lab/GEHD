@@ -42,11 +42,11 @@ data:
     num_workers: 4
     episodes: -1    # -1 means all
 
-    shuffle: true
+    shuffle: false
 
     # environment
     env:
-      data_path: "main_model/disk/problems/mesh_cvrp_data_train.h5"
+      data_path: "main_model/disk/problems/vrp100_hgs_train_100w.h5"
       sub_path: true
     # others
     disable: false
