@@ -76,7 +76,7 @@ class LEHDDataset(Dataset):
         self.load_raw_data(self.episodes)
 
         # Load mesh data for computing node locations
-        # self.load_mesh_data()
+        self.load_mesh_data()
 
     def __len__(self):
         return len(self.raw_data_problems)
@@ -89,6 +89,8 @@ class LEHDDataset(Dataset):
         # Get problem indices
         problems = self.raw_data_problems[idx]
 
+        city_problems = self.city_indices[problems]
+
         # Get node coordinates from mesh city using problem indices
         # nodes = self.city[problem_indices]
 
@@ -100,8 +102,8 @@ class LEHDDataset(Dataset):
         capacity_expanded = capacity.unsqueeze(0).repeat(solution.shape[0] + 1)
         problem = torch.cat(
             (
-                problems[:, 0].unsqueeze(-1),
-                problems[:, 1].unsqueeze(-1),
+                problems.unsqueeze(-1),
+                city_problems.unsqueeze(-1),
                 demand.unsqueeze(-1),
                 capacity_expanded.unsqueeze(-1),
             ),

@@ -2,14 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from main_model.src.utils.general_utils import read_mesh
+from main_model.src.architecture.encoder_architecture import GraphUNet
+from main_model.src.utils.hgraph.hgraph import Data, HGraph
+
 
 class LEHD(nn.Module):
-
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
-        self.encoder = CVRP_Encoder(**model_params)
-        self.decoder = CVRP_Decoder(**model_params)
+        self.encoder = Encoder(**model_params)
+        self.decoder = Decoder(**model_params)
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.encoded_nodes = None
 
@@ -19,17 +24,15 @@ class LEHD(nn.Module):
         selected_node_list,
         solution,
         current_step,
-        raw_data_capacity=None,
+        capacities=None,
         mode="train",
     ):
-        self.mode = mode
         # solution's shape : [B, V]
-        self.capacity = raw_data_capacity.ravel()[0].item()
+        self.capacity = capacities.ravel()[0].item()
         batch_size = problems.shape[0]
         problem_size = problems.shape[1]
         split_line = problem_size - 1
 
-        # TODO: Check this
         def probs_to_selected_nodes(probs_, split_line_, batch_size_):
             selected_node_student_ = probs_.argmax(dim=1)  # shape: B
             is_via_depot_student_ = (
@@ -37,7 +40,9 @@ class LEHD(nn.Module):
             )  # Nodes with an index greater than customer_num are via depot
             not_via_depot_student_ = selected_node_student_ < split_line_
 
-            selected_flag_student_ = torch.zeros(batch_size_, dtype=torch.int)
+            selected_flag_student_ = torch.zeros(
+                batch_size_, dtype=torch.int, device=self.device
+            )
             selected_flag_student_[is_via_depot_student_] = 1
             selected_node_student_[is_via_depot_student_] = (
                 selected_node_student_[is_via_depot_student_] - split_line_ + 1
@@ -51,11 +56,13 @@ class LEHD(nn.Module):
                 selected_flag_student_,
             )
 
-        if self.mode == "train":
+        if mode == "train":
             remaining_capacity = problems[:, 1, 3]
 
+            encoder_output = self.encoder(problems, self.capacity)
+
             probs = self.decoder(
-                self.encoder(problems, self.capacity),
+                encoder_output,
                 selected_node_list,
                 self.capacity,
                 remaining_capacity,
@@ -72,7 +79,6 @@ class LEHD(nn.Module):
             is_via_depot = selected_flag_teacher == 1
             selected_node_teacher_copy = selected_node_teacher - 1
             selected_node_teacher_copy[is_via_depot] += split_line
-            # print('selected_node_teacher after',selected_node_teacher)
             prob_select_node = probs[
                 torch.arange(batch_size)[:, None], selected_node_teacher_copy[:, None]
             ].reshape(
@@ -81,10 +87,9 @@ class LEHD(nn.Module):
 
             loss_node = -prob_select_node.type(torch.float64).log().mean()
 
-        if self.mode == "test":
-
+        if mode == "test":
             remaining_capacity = problems[:, 1, 3]
-            # print(problems.shape)
+
             if current_step <= 1:
                 self.encoded_nodes = self.encoder(problems, self.capacity)
 
@@ -96,12 +101,11 @@ class LEHD(nn.Module):
             )
 
             selected_node_student = probs.argmax(dim=1)  # shape: B
-            is_via_depot_student = (
-                selected_node_student >= split_line
-            )  # 节点index大于 customer_num的是通过depot的
+            is_via_depot_student = selected_node_student >= split_line
             not_via_depot_student = selected_node_student < split_line
-            # print(selected_node_student)
-            selected_flag_student = torch.zeros(batch_size, dtype=torch.int)
+            selected_flag_student = torch.zeros(
+                batch_size, dtype=torch.int, device=self.device
+            )
             selected_flag_student[is_via_depot_student] = 1
             selected_node_student[is_via_depot_student] = (
                 selected_node_student[is_via_depot_student] - split_line + 1
@@ -125,80 +129,80 @@ class LEHD(nn.Module):
         )
 
 
-class CVRP_Encoder(nn.Module):
+class PretrainedGeGnn(nn.Module):
+    def __init__(self, config):
+        super(PretrainedGeGnn, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = GraphUNet(
+            config["in_channels"], config["hidden_channels"], config["out_channels"]
+        ).to(self.device)
+        self.embds = None
+        ckpt = torch.load(config["ckp_path"], map_location=self.device)
+        self.model.load_state_dict(ckpt["model_dict"])
+        self.mesh_path = config["mesh_path"]
+
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+    def compute_embeddings(self):
+        self.model.eval()
+
+        mesh = read_mesh(self.mesh_path)
+        # No need for with torch.no_grad() if parameters are frozen
+        vertices = mesh["vertices"].to(self.device)
+        normals = mesh["normals"].to(self.device)
+        edges = mesh["edges"].to(self.device)
+        tree = HGraph()
+        tree.build_single_hgraph(
+            Data(x=torch.cat([vertices, normals], dim=1), edge_index=edges)
+        )
+        self.embds = self.model(
+            torch.cat([vertices, normals], dim=1),
+            tree,
+            tree.depth,
+            dist=None,
+            only_embd=True,
+        )
+        # Explicitly detach embeddings from computation graph
+        self.embds = self.embds.detach()
+        self.embds = F.normalize(self.embds)  # normalize embeddings
+
+    def forward(self, idxs):
+        assert self.embds is not None, "Please call compute_embeddings() first!"
+        assert idxs.dtype == torch.int64, "Please make sure idxs has type int64"
+        # No need for with torch.no_grad() if parameters are frozen
+        return self.embds[idxs]
+
+
+class Encoder(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         embedding_dim = self.model_params["embedding_dim"]
-        encoder_layer_num = 1
-        self.embedding = nn.Linear(3, embedding_dim, bias=True)
-        self.layers = nn.ModuleList(
-            [EncoderLayer(**model_params) for _ in range(encoder_layer_num)]
+
+        self.pretrained_gegnn = PretrainedGeGnn(
+            self.model_params["pretrained_encoder"]
+        ).to(self.device)
+        self.pretrained_gegnn.compute_embeddings()
+
+        self.transition_layer = nn.Linear(
+            self.model_params["pretrained_encoder"]["out_channels"] + 1,
+            embedding_dim,
+            bias=True,
         )
 
     def forward(self, data_, capacity):
+        embedded_input = self.pretrained_gegnn(data_[:, :, 1].to(torch.int64))
+        embedded_input = torch.cat(
+            (embedded_input, data_[:, :, 2].unsqueeze(-1) / capacity), dim=2
+        )
+        out = self.transition_layer(embedded_input)
 
-        data = data_.clone().detach()
-        data = data[:, :, :3]
-
-        # data[:, :, 0] = data[:, :, 0] / 101
-        # data[:, :, 1] = data[:, :, 1] / 10001
-        data[:, :, 2] = data[:, :, 2] / capacity
-
-        embedded_input = self.embedding(data)
-
-        out = embedded_input  # [B*(V-1), problem_size - current_step +2, embedding_dim]
-
-        layer_count = 0
-        for layer in self.layers:
-            out = layer(out)
-            layer_count += 1
         return out
 
 
-class EncoderLayer(nn.Module):
-    def __init__(self, **model_params):
-        super().__init__()
-        self.model_params = model_params
-        embedding_dim = self.model_params["embedding_dim"]
-        head_num = self.model_params["head_num"]
-        qkv_dim = self.model_params["qkv_dim"]
-
-        self.Wq = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
-
-        self.feedForward = Feed_Forward_Module(**model_params)
-
-    def forward(self, input1):
-
-        head_num = self.model_params["head_num"]
-
-        q = reshape_by_heads(self.Wq(input1), head_num=head_num)
-        k = reshape_by_heads(self.Wk(input1), head_num=head_num)
-        v = reshape_by_heads(self.Wv(input1), head_num=head_num)
-
-        out_concat = multi_head_attention(q, k, v)  # shape: (B, n, head_num*key_dim)
-
-        multi_head_out = self.multi_head_combine(
-            out_concat
-        )  # shape: (B, n, embedding_dim)
-
-        out1 = input1 + multi_head_out
-        out2 = self.feedForward(out1)
-
-        out3 = out1 + out2
-        return out3
-        # shape: (batch, problem, EMBEDDING_DIM)
-
-
-########################################
-# DECODER
-########################################
-
-
-class CVRP_Decoder(nn.Module):
+class Decoder(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
@@ -217,8 +221,9 @@ class CVRP_Decoder(nn.Module):
         )
         self.Linear_final = nn.Linear(embedding_dim, 2, bias=True)
 
-    def _get_new_data(self, data, selected_node_list, prob_size, B_V):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    def _get_new_data(self, data, selected_node_list, prob_size, B_V):
         list = selected_node_list
 
         new_list = torch.arange(prob_size)[None, :].repeat(B_V, 1)
@@ -253,7 +258,7 @@ class CVRP_Decoder(nn.Module):
             B_V, new_data_len, emb_dim
         )
 
-        return new_data_
+        return new_data_.to(self.device)
 
     def _get_encoding(self, encoded_nodes, node_index_to_pick):
 
@@ -336,11 +341,11 @@ class CVRP_Decoder(nn.Module):
         index_small = torch.le(props, 1e-5)
         props_clone = props.clone()
         props_clone[index_small] = props_clone[index_small] + torch.tensor(
-            1e-7, dtype=props_clone[index_small].dtype
+            1e-7, dtype=props_clone[index_small].dtype, device=self.device
         )
         props = props_clone
 
-        new_props = torch.zeros(batch_size_V, 2 * (problem_size))
+        new_props = torch.zeros(batch_size_V, 2 * (problem_size), device=self.device)
 
         # The function of the following part is to fill the probability of props into the new_props,
         index_1_ = torch.arange(batch_size_V, dtype=torch.long)[:, None].repeat(
