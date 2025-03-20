@@ -42,7 +42,7 @@ data:
     num_workers: 4
     episodes: -1    # -1 means all
 
-    shuffle: false
+    shuffle: true
 
     # environment
     env:
