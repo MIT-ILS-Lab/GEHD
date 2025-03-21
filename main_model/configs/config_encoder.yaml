@@ -18,7 +18,7 @@ solver:
   lr_power: 0.9
 
   # gradient accumulation
-  accumulation_steps: 32 # gradient accumulation
+  accumulation_steps: 2 # gradient accumulation
 
   # others
   progress_bar: True
@@ -60,7 +60,9 @@ data:
     # data loading
     location: ./
     filelist: main_model/disk/filelist/filelist_train.txt
-    batch_size: 1
+    batch_size: 2
+    file_rep: 10 # number of times each file is repeated in the dataset
+
     shuffle: True
     num_workers: 0
 
@@ -78,13 +80,15 @@ data:
     # data loading
     location: ./
     filelist: main_model/disk/filelist/filelist_test.txt
-    batch_size: 4
+    batch_size: 1
+    file_rep: 1 # number of times each file is repeated in the dataset
+
     shuffle: True
     num_workers: 0
 
     # others
     disable: False # wether or not to disable the test set
-    take: -1  # Number of samples used for testing
+    take: -1  # number of samples used for testing
 
 model:
   name: unet

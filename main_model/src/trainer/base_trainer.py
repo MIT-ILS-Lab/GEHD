@@ -40,17 +40,18 @@ class Solver:
             True  # Set to False to avoid backpropagation after each step
         )
 
-        # if self.slurm_job_name == "JupyterNotebook":
-        #     self.log_wandb = False
-        # else:
-        #     self.log_wandb = True
-        # logger.info(f"wandb logging: {self.log_wandb}")
+        if self.slurm_job_name == "JupyterNotebook":
+            self.log_wandb = False
+        else:
+            self.log_wandb = True
+        logger.info(f"wandb logging: {self.log_wandb}")
 
-        # if "run_name" not in self.config["solver"]["wandb"].keys():
-        #     self.config["solver"]["wandb"]["run_name"] = self.slurm_job_id
+        if "run_name" not in self.config["solver"]["wandb"].keys():
+            self.config["solver"]["wandb"]["run_name"] = self.slurm_job_id
 
-        # if self.rank == 0 and self.log_wandb:
-        if self.rank == 0:
+        if self.rank == 0 and self.log_wandb:
+            os.makedirs(self.config["solver"]["logdir"], exist_ok=True)
+
             wandb.init(
                 project=self.config["solver"]["wandb"]["project_name"],
                 name=self.config["solver"]["wandb"]["run_name"],
@@ -58,11 +59,11 @@ class Solver:
                 config=self.config,
                 mode="offline",
             )
-            # logger.info(
-            #     f"wandb project name: {self.config['solver']['wandb']['project_name']}"
-            # )
-            # logger.info(f"wandb run name: {self.config['solver']['wandb']['run_name']}")
-            # logger.info(f"wandb dir: {self.config['solver']['logdir']}")
+            logger.info(
+                f"wandb project name: {self.config['solver']['wandb']['project_name']}"
+            )
+            logger.info(f"wandb run name: {self.config['solver']['wandb']['run_name']}")
+            logger.info(f"wandb dir: {self.config['solver']['logdir']}")
 
         self.model = None
         self.optimizer = None
@@ -185,9 +186,8 @@ class Solver:
         train_tracker = AverageTracker()
         rng = range(len(self.train_loader))
 
-        # TODO: Check this, make it work for general
-        # if self.batch_backprop:
-        #     self.optimizer.zero_grad()  # zero grad at the start of accumulation, TODO: Check this, shouldn't it be the model?
+        if self.batch_backprop:
+            self.optimizer.zero_grad()
 
         # if rng is 1, don't use tqdm
         if len(rng) == 1:
@@ -221,7 +221,6 @@ class Solver:
                 if (self.global_step + 1) % self.accumulation_steps == 0:
                     self.clip_grad_norm()
                     self.optimizer.step()
-                    self.scheduler.step()
                     self.optimizer.zero_grad()
                     if self.accumulation_steps > 1:
                         logging.info(
@@ -252,15 +251,15 @@ class Solver:
 
             self.global_step += 1
 
-        # # Apply gradients if any remain after the loop finishes
-        # if (self.global_step % self.accumulation_steps != 0) and self.batch_backprop:
-        #     self.clip_grad_norm()
-        #     self.optimizer.step()
-        #     self.optimizer.zero_grad()
-        #     if self.accumulation_steps > 1:
-        #         logging.info(
-        #             f"Successfully ran accumulated gradient step at step {self.global_step}"
-        #         )
+        # Apply gradients if any remain after the loop finishes
+        if (self.global_step % self.accumulation_steps != 0) and self.batch_backprop:
+            self.clip_grad_norm()
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            if self.accumulation_steps > 1:
+                logging.info(
+                    f"Successfully ran accumulated gradient step at step {self.global_step}"
+                )
 
         if self.rank == 0:
             log_data = train_tracker.average()
@@ -375,7 +374,7 @@ class Solver:
                 self.train_epoch(epoch, pbar)
 
                 # update learning rate
-                # self.scheduler.step() # TODO: CHeck this
+                self.scheduler.step()
                 lr = self.scheduler.get_last_lr()
                 self.summary_writer.add_scalar("train/lr", lr[0], epoch)
 
@@ -461,3 +460,4 @@ class Solver:
 
     def run(self):
         eval("self.%s()" % self.config["solver"]["run"])
+        wandb.finish()

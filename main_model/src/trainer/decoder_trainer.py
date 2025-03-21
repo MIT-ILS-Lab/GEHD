@@ -1,3 +1,7 @@
+import time
+import logging
+import wandb
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -18,8 +22,6 @@ class LEHDTrainer(Solver):
         # Store trainer and testing params
         self.trainer_params = config["data"]["train"]
         self.testing_params = config["data"]["test"]
-
-        self.batch_backprop = False  # Set to False to avoid backpropagation after step (do it in the step function)
 
         # Set random seed
         torch.manual_seed(22)
@@ -62,6 +64,68 @@ class LEHDTrainer(Solver):
             persistent_workers=True,
         )
         return data_loader
+
+    def train_epoch(self, epoch, pbar):
+        self.model.train()
+
+        tick = time.time()
+        elapsed_time = dict()
+        train_tracker = AverageTracker()
+        rng = range(len(self.train_loader))
+
+        # if rng is 1, don't use tqdm
+        if len(rng) == 1:
+            self.disable_tqdm = True
+
+        for it in tqdm(
+            range(len(self.train_loader)),
+            desc=f"Train Epoch {epoch}",
+            position=1,
+            leave=False,
+            disable=self.disable_tqdm,
+        ):
+            # load data
+            batch = self.train_iter.__next__()
+            batch["iter_num"] = it
+            batch["epoch"] = epoch
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
+
+            elapsed_time["time/data"] = torch.Tensor([time.time() - tick])
+
+            # forward and backward
+            output = self.train_step(batch)
+
+            # track the averaged tensors
+            elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
+            tick = time.time()
+            output.update(elapsed_time)
+            train_tracker.update(output)
+
+            if (
+                it % 50 == 0
+                and self.config["solver"]["empty_cache"]
+                and torch.cuda.is_available()
+            ):
+                torch.cuda.empty_cache()
+
+            if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
+                train_tracker.log(
+                    epoch,
+                    msg_tag="- ",
+                    notes=f"iter: {self.global_step}",
+                    print_time=False,
+                    pbar=pbar,
+                )
+
+            self.global_step += 1
+
+        if self.rank == 0:
+            log_data = train_tracker.average()
+            log_data["lr"] = self.optimizer.param_groups[0]["lr"]
+            wandb.log(log_data, step=self.global_step)
 
     def train_step(self, batch):
         # Extract data from batch
@@ -121,7 +185,9 @@ class LEHDTrainer(Solver):
                 # Backpropagate and update model
                 self.model.zero_grad()
                 loss_mean.backward()
-                # self.clip_grad_norm()
+
+                self.clip_grad_norm()
+
                 self.optimizer.step()
 
             # Update capacity in problems tensor directly
