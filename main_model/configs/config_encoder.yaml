@@ -2,8 +2,8 @@ solver:
   run: train
 
   # logging and processing
-  logdir: main_model/logs/trained_encoder
-  max_epoch: 16000
+  logdir: main_model/logs/encoder_64
+  max_epoch: 10000
   test_every_epoch: 20
   save_every_epoch: 100
   log_per_iter: 10
@@ -29,8 +29,8 @@ solver:
 
   # wandb
   wandb:
-    project_name: "encoder"
-    run_name: "my_encoder_run"
+    project_name: "encoder_64"
+    run_name: "my_encoder_run_64"
 
 data:
   preparation:
@@ -91,7 +91,7 @@ model:
 
   in_channels: 6          # input dimension of each vertices
   hidden_channels: 256    # hidden dimensions of the vertices
-  out_channels: 256       # the final embedding dimension of each vertices
+  out_channels: 64         # the final embedding dimension of each vertices
 
   conv_type: my # SAGE or my
   include_distance: True      # only appliable when use dist conv. if true, the distance between points will be concated to the feature.

@@ -43,6 +43,7 @@ class Dataset(torch.utils.data.Dataset):
             ]
 
     def __len__(self):
+        # TODO: Cut the option for multiple filenames? But instead set a custom episode length?
         return len(self.filenames)
 
     def __getitem__(self, idx):

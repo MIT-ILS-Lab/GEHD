@@ -38,7 +38,7 @@ data:
     mode: "train"
 
     # data loading
-    batch_size: 8
+    batch_size: 32
     num_workers: 4
     episodes: -1    # -1 means all
 
