@@ -1,10 +1,10 @@
 import time
-import logging
 import wandb
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
+
+from main_model.src.utils.tracker import AverageTracker
 
 from main_model.src.architecture.decoder_architecture import LEHD
 from main_model.src.trainer.base_trainer import Solver
@@ -70,7 +70,6 @@ class LEHDTrainer(Solver):
 
         tick = time.time()
         elapsed_time = dict()
-        train_tracker = AverageTracker()
         rng = range(len(self.train_loader))
 
         # if rng is 1, don't use tqdm
@@ -84,6 +83,8 @@ class LEHDTrainer(Solver):
             leave=False,
             disable=self.disable_tqdm,
         ):
+            train_tracker = AverageTracker()
+
             # load data
             batch = self.train_iter.__next__()
             batch["iter_num"] = it
@@ -122,10 +123,10 @@ class LEHDTrainer(Solver):
 
             self.global_step += 1
 
-        if self.rank == 0:
-            log_data = train_tracker.average()
-            log_data["lr"] = self.optimizer.param_groups[0]["lr"]
-            wandb.log(log_data, step=self.global_step)
+            if self.rank == 0:
+                log_data = train_tracker.average()
+                log_data["lr"] = self.optimizer.param_groups[0]["lr"]
+                wandb.log(log_data, step=self.global_step)
 
     def train_step(self, batch):
         # Extract data from batch

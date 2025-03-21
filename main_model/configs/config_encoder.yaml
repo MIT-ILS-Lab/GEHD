@@ -2,11 +2,11 @@ solver:
   run: train
 
   # logging and processing
-  logdir: main_model/logs/encoder_64
-  max_epoch: 10000
-  test_every_epoch: 20
-  save_every_epoch: 100
-  log_per_iter: 10
+  logdir: main_model/logs/encoder_32
+  max_epoch: 15
+  test_every_epoch: 1
+  save_every_epoch: 1
+  log_per_iter: 1
 
   # optimizer
   type: adamw
@@ -18,7 +18,7 @@ solver:
   lr_power: 0.9
 
   # gradient accumulation
-  accumulation_steps: 2 # gradient accumulation
+  accumulation_steps: 4 # gradient accumulation
 
   # others
   progress_bar: True
@@ -29,8 +29,8 @@ solver:
 
   # wandb
   wandb:
-    project_name: "encoder_64"
-    run_name: "my_encoder_run_64"
+    project_name: "encoder_32"
+    run_name: "my_encoder_run_32"
 
 data:
   preparation:
@@ -60,8 +60,8 @@ data:
     # data loading
     location: ./
     filelist: main_model/disk/filelist/filelist_train.txt
-    batch_size: 2
-    file_rep: 10 # number of times each file is repeated in the dataset
+    batch_size: 8
+    file_rep: 1000 # number of times each file is repeated in the dataset
 
     shuffle: True
     num_workers: 0
@@ -95,7 +95,7 @@ model:
 
   in_channels: 6          # input dimension of each vertices
   hidden_channels: 256    # hidden dimensions of the vertices
-  out_channels: 64         # the final embedding dimension of each vertices
+  out_channels: 32         # the final embedding dimension of each vertices
 
   conv_type: my # SAGE or my
   include_distance: True      # only appliable when use dist conv. if true, the distance between points will be concated to the feature.

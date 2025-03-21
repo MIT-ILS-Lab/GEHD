@@ -251,6 +251,11 @@ class Solver:
 
             self.global_step += 1
 
+        if self.rank == 0 and self.log_wandb:
+            log_data = train_tracker.average()
+            log_data["lr"] = self.optimizer.param_groups[0]["lr"]
+            wandb.log(log_data, step=self.global_step)
+
         # Apply gradients if any remain after the loop finishes
         if (self.global_step % self.accumulation_steps != 0) and self.batch_backprop:
             self.clip_grad_norm()
@@ -260,11 +265,6 @@ class Solver:
                 logging.info(
                     f"Successfully ran accumulated gradient step at step {self.global_step}"
                 )
-
-        if self.rank == 0:
-            log_data = train_tracker.average()
-            log_data["lr"] = self.optimizer.param_groups[0]["lr"]
-            wandb.log(log_data, step=self.global_step)
 
     def test_epoch(self, epoch, pbar):
         self.model.eval()
