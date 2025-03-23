@@ -1,5 +1,6 @@
 import time
 import wandb
+import logging
 
 import torch
 from torch.utils.data import DataLoader
@@ -13,6 +14,8 @@ from main_model.src.data.decoder_dataloader import (
     InfiniteLEHDBatchSampler,
     get_dataset,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LEHDTrainer(Solver):
@@ -65,29 +68,18 @@ class LEHDTrainer(Solver):
         )
         return data_loader
 
-    def train_epoch(self, epoch, pbar):
+    def train_epoch(self, epoch):
         self.model.train()
 
         tick = time.time()
         elapsed_time = dict()
-        rng = range(len(self.train_loader))
 
-        # if rng is 1, don't use tqdm
-        if len(rng) == 1:
-            self.disable_tqdm = True
-
-        for it in tqdm(
-            range(len(self.train_loader)),
-            desc=f"Train Epoch {epoch}",
-            position=1,
-            leave=False,
-            disable=self.disable_tqdm,
-        ):
+        for episode in range(1, len(self.train_loader) + 1):
             train_tracker = AverageTracker()
 
             # load data
             batch = self.train_iter.__next__()
-            batch["iter_num"] = it
+            batch["iter_num"] = episode
             batch["epoch"] = epoch
             batch = {
                 k: v.to(self.device) if isinstance(v, torch.Tensor) else v
@@ -106,20 +98,16 @@ class LEHDTrainer(Solver):
             train_tracker.update(output)
 
             if (
-                it % 50 == 0
+                episode % 50 == 0
                 and self.config["solver"]["empty_cache"]
                 and torch.cuda.is_available()
             ):
                 torch.cuda.empty_cache()
 
             if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
-                train_tracker.log(
-                    epoch,
-                    msg_tag="- ",
-                    notes=f"iter: {self.global_step}",
-                    print_time=False,
-                    pbar=pbar,
-                )
+                logger.info('Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}'.format(
+                    epoch, episode, len(self.train_loader), episode / len(self.train_loader) * 100, output["train/loss"], output["time/batch"].item()/60
+                ))
 
             self.global_step += 1
 

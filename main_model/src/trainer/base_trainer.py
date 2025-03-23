@@ -16,6 +16,7 @@ from torch.utils.data import DataLoader
 from main_model.src.utils.sampler import InfSampler
 from main_model.src.utils.tracker import AverageTracker
 from main_model.src.utils.lr_scheduler import get_lr_scheduler
+from main_model.src.utils.general_utils import TimeEstimator
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,6 @@ class Solver:
         self.rank = dist.get_rank() if dist.is_initialized() else 0
 
         self.clip_grad = self.config["solver"]["clip_grad"]
-
-        self.batch_backprop = (
-            True  # Set to False to avoid backpropagation after each step
-        )
 
         if self.slurm_job_name == "JupyterNotebook":
             self.log_wandb = False
@@ -77,6 +74,9 @@ class Solver:
         self.accumulation_steps = self.config["solver"]["accumulation_steps"]
 
         self.global_step = 0
+
+        self.time_estimator = TimeEstimator()
+
 
     def get_model(self, config):
         raise NotImplementedError
@@ -171,38 +171,26 @@ class Solver:
         self.log_file = os.path.join(self.logdir, "log.csv")
 
         if self.is_master:
-            logging.info("logdir: " + self.logdir)
+            logger.info("logdir: " + self.logdir)
 
         if self.is_master and set_writer:
             self.summary_writer = SummaryWriter(self.logdir, flush_secs=20)
             if not os.path.exists(self.ckpt_dir):
                 os.makedirs(self.ckpt_dir)
 
-    def train_epoch(self, epoch, pbar):
+    def train_epoch(self, epoch):
         self.model.train()
 
         tick = time.time()
         elapsed_time = dict()
         train_tracker = AverageTracker()
-        rng = range(len(self.train_loader))
 
-        if self.batch_backprop:
-            self.optimizer.zero_grad()
+        self.optimizer.zero_grad()
 
-        # if rng is 1, don't use tqdm
-        if len(rng) == 1:
-            self.disable_tqdm = True
-
-        for it in tqdm(
-            range(len(self.train_loader)),
-            desc=f"Train Epoch {epoch}",
-            position=1,
-            leave=False,
-            disable=self.disable_tqdm,
-        ):
+        for episode in range(1, len(self.train_loader) + 1):
             # load data
             batch = self.train_iter.__next__()
-            batch["iter_num"] = it
+            batch["iter_num"] = episode
             batch["epoch"] = epoch
             batch = {
                 k: v.to(self.device) if isinstance(v, torch.Tensor) else v
@@ -214,18 +202,14 @@ class Solver:
             # forward and backward
             output = self.train_step(batch)
 
-            if self.batch_backprop:
-                loss = output["train/loss"] / self.accumulation_steps
-                loss.backward()
-                # apply the gradient every accumulation_steps
-                if (self.global_step + 1) % self.accumulation_steps == 0:
-                    self.clip_grad_norm()
-                    self.optimizer.step()
-                    self.optimizer.zero_grad()
-                    if self.accumulation_steps > 1:
-                        logging.info(
-                            f"Successfully ran accumulated gradient step at step {self.global_step}"
-                        )
+            loss = output["train/loss"] / self.accumulation_steps
+            loss.backward()
+            # apply the gradient every accumulation_steps
+            if (self.global_step + 1) % self.accumulation_steps == 0:
+                self.clip_grad_norm()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+
 
             # track the averaged tensors
             elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
@@ -233,21 +217,17 @@ class Solver:
             output.update(elapsed_time)
             train_tracker.update(output)
 
+            if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
+                logger.info('Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}'.format(
+                    epoch, episode, len(self.train_loader), episode / len(self.train_loader) * 100, output["train/loss"], output["time/batch"].item()/60
+                ))
+
             if (
-                it % 50 == 0
+                episode % 50 == 0
                 and self.config["solver"]["empty_cache"]
                 and torch.cuda.is_available()
             ):
                 torch.cuda.empty_cache()
-
-            if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
-                train_tracker.log(
-                    epoch,
-                    msg_tag="- ",
-                    notes=f"iter: {self.global_step}",
-                    print_time=False,
-                    pbar=pbar,
-                )
 
             self.global_step += 1
 
@@ -257,14 +237,14 @@ class Solver:
             wandb.log(log_data, step=self.global_step)
 
         # Apply gradients if any remain after the loop finishes
-        if (self.global_step % self.accumulation_steps != 0) and self.batch_backprop:
+        if (self.global_step % self.accumulation_steps != 0):
             self.clip_grad_norm()
             self.optimizer.step()
             self.optimizer.zero_grad()
-            if self.accumulation_steps > 1:
-                logging.info(
-                    f"Successfully ran accumulated gradient step at step {self.global_step}"
-                )
+
+        logger.info(' ')
+        logger.info('Avg. Loss: {:.2f} Avg. Time: {:.2f} min'.format(train_tracker.average()["train/loss"], train_tracker.average()["time/batch"]/60))
+
 
     def test_epoch(self, epoch, pbar):
         self.model.eval()
@@ -327,7 +307,6 @@ class Solver:
             },
             ckpt_name + ".solver.tar",
         )
-        logging.info(f"Checkpoint saved to {ckpt_name}")
 
     def load_checkpoint(self):
         ckpt = self.config["solver"]["ckpt"]
@@ -365,26 +344,28 @@ class Solver:
         self.configure_log()
         self.load_checkpoint()
 
-        rng = range(self.start_epoch, self.config["solver"]["max_epoch"] + 1)
-        with tqdm(
-            rng, desc="Epoch", position=0, leave=True, disable=self.disable_tqdm
-        ) as pbar:
-            for epoch in pbar:
-                # training epoch
-                self.train_epoch(epoch, pbar)
+        self.time_estimator.reset(self.start_epoch)
 
-                # update learning rate
-                self.scheduler.step()
-                lr = self.scheduler.get_last_lr()
-                self.summary_writer.add_scalar("train/lr", lr[0], epoch)
+        for epoch in range(self.start_epoch, self.config["solver"]["max_epoch"] + 1):
+            logger.info(f'====================  EPOCH {epoch:3d}/{self.config["solver"]["max_epoch"]:3d}  ====================')
+            # training epoch
+            self.train_epoch(epoch)
 
-                # testing epoch
-                # if epoch % self.config["solver"]["test_every_epoch"] == 0:
-                # self.test_epoch(epoch, pbar)
+            # update learning rate
+            self.scheduler.step()
+            lr = self.scheduler.get_last_lr()
+            self.summary_writer.add_scalar("train/lr", lr[0], epoch)
 
-                # checkpoint
-                if epoch % self.config["solver"]["save_every_epoch"] == 0:
-                    self.save_checkpoint(epoch)
+            elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.config["solver"]["max_epoch"])
+            logger.info("Elapsed: {}, Remaining: {}".format(elapsed_time_str, remain_time_str))
+
+            # testing epoch
+            # if epoch % self.config["solver"]["test_every_epoch"] == 0:
+            # self.test_epoch(epoch, pbar)
+
+            # checkpoint
+            if epoch % self.config["solver"]["save_every_epoch"] == 0:
+                self.save_checkpoint(epoch)
 
     def test(self):
         self.manual_seed()
