@@ -77,7 +77,6 @@ class Solver:
 
         self.time_estimator = TimeEstimator()
 
-
     def get_model(self, config):
         raise NotImplementedError
 
@@ -210,7 +209,6 @@ class Solver:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-
             # track the averaged tensors
             elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
             tick = time.time()
@@ -218,9 +216,16 @@ class Solver:
             train_tracker.update(output)
 
             if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
-                logger.info('Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}'.format(
-                    epoch, episode, len(self.train_loader), episode / len(self.train_loader) * 100, output["train/loss"], output["time/batch"].item()/60
-                ))
+                logger.info(
+                    "Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}".format(
+                        epoch,
+                        episode,
+                        len(self.train_loader),
+                        episode / len(self.train_loader) * 100,
+                        output["train/loss"],
+                        output["time/batch"].item() / 60,
+                    )
+                )
 
             if (
                 episode % 50 == 0
@@ -237,14 +242,19 @@ class Solver:
             wandb.log(log_data, step=self.global_step)
 
         # Apply gradients if any remain after the loop finishes
-        if (self.global_step % self.accumulation_steps != 0):
+        if self.global_step % self.accumulation_steps != 0:
             self.clip_grad_norm()
             self.optimizer.step()
             self.optimizer.zero_grad()
 
-        logger.info(' ')
-        logger.info('Avg. Loss: {:.2f} Avg. Time: {:.2f} min'.format(train_tracker.average()["train/loss"], train_tracker.average()["time/batch"]/60))
-
+        logger.info(" ")
+        logger.info("*** Summary ***")
+        logger.info(
+            "Avg. Loss: {:.2f} Avg. Time: {:.2f} min".format(
+                train_tracker.average()["train/loss"],
+                train_tracker.average()["time/batch"] / 60,
+            )
+        )
 
     def test_epoch(self, epoch, pbar):
         self.model.eval()
@@ -347,7 +357,9 @@ class Solver:
         self.time_estimator.reset(self.start_epoch)
 
         for epoch in range(self.start_epoch, self.config["solver"]["max_epoch"] + 1):
-            logger.info(f'====================  EPOCH {epoch:3d}/{self.config["solver"]["max_epoch"]:3d}  ====================')
+            logger.info(
+                f'====================  EPOCH {epoch:3d}/{self.config["solver"]["max_epoch"]:3d}  ===================='
+            )
             # training epoch
             self.train_epoch(epoch)
 
@@ -356,12 +368,20 @@ class Solver:
             lr = self.scheduler.get_last_lr()
             self.summary_writer.add_scalar("train/lr", lr[0], epoch)
 
-            elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.config["solver"]["max_epoch"])
-            logger.info("Elapsed: {}, Remaining: {}".format(elapsed_time_str, remain_time_str))
+            elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(
+                epoch, self.config["solver"]["max_epoch"]
+            )
+            logger.info(
+                "Elapsed: {}, Remaining: {}".format(elapsed_time_str, remain_time_str)
+            )
+            logger.info(" ")
 
             # testing epoch
-            # if epoch % self.config["solver"]["test_every_epoch"] == 0:
-            # self.test_epoch(epoch, pbar)
+            if epoch % self.config["solver"]["test_every_epoch"] == 0:
+                logger.info(
+                    f'-------------------  TESTING {epoch:3d}/{self.config["solver"]["max_epoch"]:3d}  -------------------'
+                )
+                self.test_epoch(epoch)
 
             # checkpoint
             if epoch % self.config["solver"]["save_every_epoch"] == 0:

@@ -217,28 +217,16 @@ def get_solution(mesh_city: dict, problem: dict, max_runtime: int) -> dict:
     # Get the precomputed geodesic matrix
     geodesic_matrix = mesh_city["geodesic_matrix"]
 
-    # Map problem indices to city indices for the distance matrix lookup
-    problem_to_city_map = {p_idx: c_idx for c_idx, p_idx in enumerate(problem_indices)}
-
-    # Function to get geodesic distance between two points using the precomputed matrix
-    def get_distance(i, j):
-        city_i = problem_to_city_map[i]
-        city_j = problem_to_city_map[j]
-        return geodesic_matrix[city_i, city_j]
-
     # Set up PyVRP model with custom distance function
     m = Model()
     m.add_vehicle_type(1000, capacity=problem["capacity"])
 
-    # Add locations
-    COORDS = mesh_city["city"][problem_indices]
-    COORDS = (COORDS[:, :2] * 1000).round().astype(np.int32).tolist()
-    DEMANDS = problem["demand"].tolist()
+    demands = problem["demand"].tolist()
 
-    depot = m.add_depot(x=COORDS[0][0], y=COORDS[0][1])
+    depot = m.add_depot(x=0, y=0)
     clients = [
-        m.add_client(x=COORDS[idx][0], y=COORDS[idx][1], delivery=DEMANDS[idx])
-        for idx in range(1, len(COORDS))
+        m.add_client(x=idx, y=idx, delivery=demands[idx])
+        for idx in range(1, len(problem_indices))
     ]
 
     # Add edges with precomputed geodesic distances
@@ -246,7 +234,7 @@ def get_solution(mesh_city: dict, problem: dict, max_runtime: int) -> dict:
     for i, frm in enumerate(locations):
         for j, to in enumerate(locations):
             if i != j:
-                distance = get_distance(problem_indices[i], problem_indices[j])
+                distance = geodesic_matrix[problem_indices[i], problem_indices[j]]
                 m.add_edge(frm, to, distance=int(distance * 1000))
 
     # Solve and return solution
@@ -426,12 +414,12 @@ def access_mesh_cvrp_data(filename: str, problem_index: int = 0) -> dict:
 if __name__ == "__main__":
     # TODO: Sync this mesh path with the actual path in the architecture/ config file
     mesh_path = "main_model/disk/meshes/sphere.obj"
-    filename_train = "main_model/disk/problems/mesh_cvrp_data_train.h5"
-    filename_test = "main_model/disk/problems/mesh_cvrp_data_test.h5"
-    num_problems_train = 1000000
-    num_problems_test = 100
-    problem_size = 100
-    num_customers = -1
+    filename_train = "main_model/disk/problems/mesh_cvrp_data_train_new.h5"
+    filename_test = "main_model/disk/problems/mesh_cvrp_data_test_new.h5"
+    num_problems_train = 1000
+    num_problems_test = 20
+    problem_size = 20
+    num_customers = 20
 
     # TODO: need to hardcode the depot location
 

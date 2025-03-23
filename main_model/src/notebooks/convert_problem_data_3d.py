@@ -34,19 +34,28 @@ def h5_to_txt(h5_filename, txt_filename, num_problems=None):
             demand = [int(d) for d in demand]
 
             # Get city coordinates (first entry is depot)
-            city_indices = hf["city_indices"][:]
-            problem_indices = city_indices[problem].tolist()
+            # city_indices = hf["city_indices"][:]
+            # problem_indices = city_indices[problem].tolist()
 
-            problem_coords = [
-                [problem[i] / (len(problem)), problem_indices[i] / 1001]
-                for i in range(len(problem))
-            ]
+            # problem_coords = [
+            #     [problem[i] / 101, problem_indices[i] / 10001]
+            #     for i in range(len(problem))
+            # ]
 
             # Separate depot and customer coordinates
-            depot = problem_coords[0][:2]  # First 2 dimensions only
-            customer_coords = [
-                coord[:2] for coord in problem_coords[1:]
-            ]  # Flatten to 1D list
+            # depot = problem_coords[0][:2]  # First 2 dimensions only
+            # customer_coords = [
+            #     coord[:2] for coord in problem_coords[1:]
+            # ]  # Flatten to 1D list
+            # customer_coords_flat = [
+            #     item for sublist in customer_coords for item in sublist
+            # ]
+
+            city = hf["city"][:]
+            problem_coords = city[problem].tolist()
+
+            depot = problem_coords[0]
+            customer_coords = problem_coords[1:]
             customer_coords_flat = [
                 item for sublist in customer_coords for item in sublist
             ]
@@ -171,7 +180,8 @@ def txt_to_h5(txt_filename, h5_filename, num_problems=100):
 if __name__ == "__main__":
     # Convert from H5 to TXT
     h5_to_txt(
-        "main_model/disk/problems/mesh_cvrp_data_train_new.h5", "vrp_train_data_new.txt"
+        "main_model/disk/problems/mesh_cvrp_data_train_new.h5",
+        "vrp_train_data_new_3d.txt",
     )
 
     # Convert from TXT to H5 v

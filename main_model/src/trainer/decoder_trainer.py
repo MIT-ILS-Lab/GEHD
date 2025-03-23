@@ -105,9 +105,16 @@ class LEHDTrainer(Solver):
                 torch.cuda.empty_cache()
 
             if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
-                logger.info('Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}'.format(
-                    epoch, episode, len(self.train_loader), episode / len(self.train_loader) * 100, output["train/loss"], output["time/batch"].item()/60
-                ))
+                logger.info(
+                    "Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}".format(
+                        epoch,
+                        episode,
+                        len(self.train_loader),
+                        episode / len(self.train_loader) * 100,
+                        output["train/loss"],
+                        output["time/batch"].item() / 60,
+                    )
+                )
 
             self.global_step += 1
 
@@ -115,6 +122,82 @@ class LEHDTrainer(Solver):
                 log_data = train_tracker.average()
                 log_data["lr"] = self.optimizer.param_groups[0]["lr"]
                 wandb.log(log_data, step=self.global_step)
+
+        logger.info(" ")
+        logger.info("*** Summary ***")
+        logger.info(
+            "Avg. Loss: {:.2f} Avg. Time: {:.2f} min".format(
+                train_tracker.average()["train/loss"],
+                train_tracker.average()["time/batch"] / 60,
+            )
+        )
+
+    def test_epoch(self, epoch):
+        self.model.eval()
+        test_tracker = AverageTracker()
+
+        tick = time.time()  # Start time for batch timing
+        elapsed_time = dict()
+
+        for episode in range(1, len(self.test_loader) + 1):  # Simple loop without tqdm
+            # Load data
+            batch = self.test_iter.__next__()
+            batch["iter_num"] = episode
+            batch["epoch"] = epoch
+
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
+
+            elapsed_time["time/data"] = torch.Tensor([time.time() - tick])
+
+            # Forward pass using test_step
+            with torch.no_grad():
+                output = self.test_step(batch)
+
+            elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
+            tick = time.time()
+
+            # Update tracker with metrics and timing
+            output.update(elapsed_time)
+            test_tracker.update(output)
+
+            # Log per iteration if required
+            if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
+                logger.info(
+                    "Epoch {:3d}: Test {:3d}/{:3d} ({:5.1f}%) Gap: {:.4f} Time: {:.2f}".format(
+                        epoch,
+                        episode,
+                        len(self.test_loader),
+                        (episode) / len(self.test_loader),
+                        output["test/gap_percentage"],
+                        output["time/batch"].item() / 60,
+                    )
+                )
+
+        # Log final averaged metrics to wandb and console
+        # Logg averages
+        logger.info(" ")
+        logger.info("*** Summary ***")
+        logger.info(
+            "Avg. Opt. Score: {:.2f}, Avg. St. Score: {:.2f}".format(
+                test_tracker.average()["test/optimal_score"],
+                test_tracker.average()["test/student_score"],
+            )
+        )
+        logger.info(
+            "Avg. Gap: {:.2f}%, Avg. Time {:.2f} min".format(
+                test_tracker.average()["test/gap_percentage"],
+                test_tracker.average()["time/batch"] / 60,
+            )
+        )
+        logger.info(" ")
+
+        if self.rank == 0:
+            log_data = test_tracker.average()
+            log_data["epoch"] = epoch
+            wandb.log(log_data, step=self.global_step)
 
     def train_step(self, batch):
         # Extract data from batch

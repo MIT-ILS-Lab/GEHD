@@ -57,6 +57,7 @@ class LEHD(nn.Module):
             )
 
         if mode == "train":
+
             remaining_capacity = problems[:, 1, 3]
 
             encoder_output = self.encoder(problems, self.capacity)
