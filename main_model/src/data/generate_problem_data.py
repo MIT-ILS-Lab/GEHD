@@ -284,7 +284,8 @@ def generate_and_solve_mesh_problem(args):
 
 
 def produce_problem_instances(
-    mesh_path: str,
+    mesh_city: dict,
+    city_size: int,
     num_problems: int,
     problem_size: int,
     filename: str,
@@ -293,16 +294,11 @@ def produce_problem_instances(
     cap_lower: int = 20,
     cap_upper: int = 50,
     max_runtime: int = 5,
-    num_customers: int = 100,
 ) -> None:
     """
     Generates multiple mesh-based CVRP problem-solution pairs and saves them in an HDF5 file.
     """
     os.makedirs(os.path.dirname(filename), exist_ok=True)
-
-    # Generate the mesh city once
-    logging.info(f"Generating mesh city with {num_customers} customers...")
-    mesh_city, city_size = get_mesh_city(mesh_path, num_customers)
 
     # Save the mesh data
     logging.info(f"Saving mesh data to {filename}...")
@@ -414,18 +410,23 @@ def access_mesh_cvrp_data(filename: str, problem_index: int = 0) -> dict:
 if __name__ == "__main__":
     # TODO: Sync this mesh path with the actual path in the architecture/ config file
     mesh_path = "main_model/disk/meshes/sphere.obj"
-    filename_train = "main_model/disk/problems/mesh_cvrp_data_train_new.h5"
-    filename_test = "main_model/disk/problems/mesh_cvrp_data_test_new.h5"
-    num_problems_train = 1000
-    num_problems_test = 20
-    problem_size = 20
-    num_customers = 20
+    filename_train = "main_model/disk/problems/mesh_cvrp_data_train_100.h5"
+    filename_test = "main_model/disk/problems/mesh_cvrp_data_test_100.h5"
+    num_problems_train = 5000
+    num_problems_test = 100
+    problem_size = 100
+    num_customers = 100
+
+    # Generate the mesh city once
+    logging.info(f"Generating mesh city with {num_customers} customers...")
+    mesh_city, city_size = get_mesh_city(mesh_path, num_customers)
 
     # TODO: need to hardcode the depot location
 
     # Generate training problems
     produce_problem_instances(
-        mesh_path=mesh_path,
+        mesh_city=mesh_city,
+        city_size=city_size,
         num_problems=num_problems_train,
         problem_size=problem_size,
         filename=filename_train,
@@ -434,12 +435,12 @@ if __name__ == "__main__":
         cap_lower=50,
         cap_upper=50,
         max_runtime=5,
-        num_customers=num_customers,  # Sample all customers
     )
 
     # Generate testing problems
     produce_problem_instances(
-        mesh_path=mesh_path,
+        mesh_city=mesh_city,
+        city_size=city_size,
         num_problems=num_problems_test,
         problem_size=problem_size,
         filename=filename_test,
@@ -448,7 +449,6 @@ if __name__ == "__main__":
         cap_lower=50,
         cap_upper=50,
         max_runtime=5,
-        num_customers=num_customers,  # Sample all customers
     )
 
     # Access and visualize a problem
