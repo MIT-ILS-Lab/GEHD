@@ -74,6 +74,8 @@ class LEHDTrainer(Solver):
         tick = time.time()
         elapsed_time = dict()
 
+        train_tracker_epoch = AverageTracker()
+
         for episode in range(1, len(self.train_loader) + 1):
             train_tracker = AverageTracker()
 
@@ -96,6 +98,7 @@ class LEHDTrainer(Solver):
             tick = time.time()
             output.update(elapsed_time)
             train_tracker.update(output)
+            train_tracker_epoch.update(output)
 
             if (
                 episode % 50 == 0
@@ -127,8 +130,8 @@ class LEHDTrainer(Solver):
         logger.info("*** Summary ***")
         logger.info(
             "Avg. Loss: {:.2f} Avg. Time: {:.2f} min".format(
-                train_tracker.average()["train/loss"],
-                train_tracker.average()["time/batch"] / 60,
+                train_tracker_epoch.average()["train/loss"],
+                train_tracker_epoch.average()["time/batch"] / 60,
             )
         )
 
