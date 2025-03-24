@@ -256,20 +256,17 @@ class Solver:
             )
         )
 
-    def test_epoch(self, epoch, pbar):
+    def test_epoch(self, epoch):
         self.model.eval()
         test_tracker = AverageTracker()
 
-        for it in tqdm(
-            range(len(self.test_loader)),
-            desc=f"Test Epoch {epoch}",
-            position=1,  # same inner position as train_epoch
-            leave=False,
-            disable=self.disable_tqdm,
-        ):
+        tick = time.time()  # Start time for batch timing
+        elapsed_time = dict()
+
+        for episode in range(1, len(self.test_loader) + 1):
             # forward
             batch = self.test_iter.__next__()
-            batch["iter_num"] = it
+            batch["iter_num"] = episode
             batch["epoch"] = epoch
 
             batch = {
@@ -277,15 +274,38 @@ class Solver:
                 for k, v in batch.items()
             }
 
+            elapsed_time["time/data"] = torch.Tensor([time.time() - tick])
+
             with torch.no_grad():
                 output = self.test_step(batch)
 
-            # track the averaged tensors
+            elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
+            tick = time.time()
+
+            # Update tracker with metrics and timing
+            output.update(elapsed_time)
             test_tracker.update(output)
 
-        test_tracker.log(
-            epoch, self.summary_writer, self.log_file, msg_tag="=>", pbar=pbar
+            logger.info(
+                "Epoch {:3d}: Test {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}".format(
+                    epoch,
+                    episode,
+                    len(self.test_loader),
+                    episode / len(self.test_loader) * 100,
+                    output["test/loss"],
+                    output["time/batch"].item() / 60,
+                )
+            )
+
+        logger.info(" ")
+        logger.info("*** Summary ***")
+        logger.info(
+            "Avg. Loss: {:.2f} Avg. Time: {:.2f} min".format(
+                test_tracker.average()["test/loss"],
+                test_tracker.average()["time/batch"] / 60,
+            )
         )
+        logger.info(" ")
 
         if self.rank == 0:
             log_data = test_tracker.average()
@@ -386,6 +406,7 @@ class Solver:
             # checkpoint
             if epoch % self.config["solver"]["save_every_epoch"] == 0:
                 self.save_checkpoint(epoch)
+                logger.info("Saved checkpoint to %s" % self.ckpt_dir)
 
     def test(self):
         self.manual_seed()

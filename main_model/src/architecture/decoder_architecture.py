@@ -193,14 +193,63 @@ class Encoder(nn.Module):
             bias=True,
         )
 
+        encoder_layer_num = 1
+        self.layers = nn.ModuleList(
+            [EncoderLayer(**model_params) for _ in range(encoder_layer_num)]
+        )
+
     def forward(self, data_, capacity):
         embedded_input = self.pretrained_gegnn(data_[:, :, 1].to(torch.int64))
         embedded_input = torch.cat(
             (embedded_input, data_[:, :, 2].unsqueeze(-1) / capacity), dim=2
         )
+
+        # Only pretrained encoder
         out = self.transition_layer(embedded_input)
 
+        # layer_count = 0
+        # for layer in self.layers:
+        #     out = layer(out)
+        #     layer_count += 1
+
         return out
+
+
+class EncoderLayer(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        self.model_params = model_params
+        embedding_dim = self.model_params["embedding_dim"]
+        head_num = self.model_params["head_num"]
+        qkv_dim = self.model_params["qkv_dim"]
+
+        self.Wq = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
+
+        self.feedForward = Feed_Forward_Module(**model_params)
+
+    def forward(self, input1):
+
+        head_num = self.model_params["head_num"]
+
+        q = reshape_by_heads(self.Wq(input1), head_num=head_num)
+        k = reshape_by_heads(self.Wk(input1), head_num=head_num)
+        v = reshape_by_heads(self.Wv(input1), head_num=head_num)
+
+        out_concat = multi_head_attention(q, k, v)  # shape: (B, n, head_num*key_dim)
+
+        multi_head_out = self.multi_head_combine(
+            out_concat
+        )  # shape: (B, n, embedding_dim)
+
+        out1 = input1 + multi_head_out
+        out2 = self.feedForward(out1)
+
+        out3 = out1 + out2
+        return out3
+        # shape: (batch, problem, EMBEDDING_DIM)
 
 
 class Decoder(nn.Module):

@@ -170,7 +170,7 @@ class LEHDTrainer(Solver):
                         epoch,
                         episode,
                         len(self.test_loader),
-                        (episode) / len(self.test_loader),
+                        (episode) / len(self.test_loader) * 100,
                         output["test/gap_percentage"],
                         output["time/batch"].item() / 60,
                     )
