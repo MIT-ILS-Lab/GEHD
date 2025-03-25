@@ -445,42 +445,39 @@ class LEHDTrainer(Solver):
         return travel_distances
 
     def cal_length(self, problems, order_node, order_flag):
-        """
-        Calculate the length of routes based on the solution using geodesic distances.
-        """
-        batch_size = problems.size(0)
+        # problems:   [B,V+1,2]
+        # order_node: [B,V]
+        # order_flag: [B,V]
+        order_node_ = order_node.clone()
 
-        # Initialize total distance
-        total_distance = torch.zeros(batch_size, device=self.device)
+        order_flag_ = order_flag.clone()
+
+        problems = problems.int()
 
         # Get the dataset to access the geodesic matrix
         dataset = self.test_loader.dataset
         geodesic_matrix = dataset.geodesic_matrix
 
-        # Initialize current position as depot (index 0)
-        current_position_idx = torch.zeros(
-            batch_size, dtype=torch.long, device=self.device
-        )
+        index_small = torch.le(order_flag_, 0.5)
+        index_bigger = torch.gt(order_flag_, 0.5)
 
-        # Iterate through the solution
-        for i in range(order_node.size(1)):
-            # Get index of the next node
-            next_node_idx = order_node[:, i]
+        order_flag_[index_small] = order_node_[index_small]
+        order_flag_[index_bigger] = 0
 
-            # Calculate geodesic distance between current and next position
-            for b in range(batch_size):
-                # Get indices for the geodesic matrix lookup
-                curr_idx = problems[b, current_position_idx[b]].long()
-                next_idx = problems[b, next_node_idx[b]].long()
+        roll_node = order_node_.roll(dims=1, shifts=1)
 
-                # Add geodesic distance directly
-                total_distance[b] += geodesic_matrix[curr_idx, next_idx]
+        order_loc = problems.gather(dim=1, index=order_node_)
+        roll_loc = problems.gather(dim=1, index=roll_node)
+        flag_loc = problems.gather(dim=1, index=order_flag_)
 
-            # Update current position
-            current_position_idx = next_node_idx.clone()
+        order_lengths = geodesic_matrix[order_loc, flag_loc]
 
-            # If returning to depot, update current position to depot
-            is_depot = order_flag[:, i] == 1
-            current_position_idx[is_depot] = 0
+        order_flag_[:, 0] = 0
 
-        return total_distance
+        flag_loc = problems.gather(dim=1, index=order_flag_)
+
+        roll_lengths = geodesic_matrix[roll_loc, flag_loc]
+
+        length = order_lengths.sum() + roll_lengths.sum()
+
+        return length
