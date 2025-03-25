@@ -456,7 +456,7 @@ class LEHDTrainer(Solver):
 
         # Get the dataset to access the geodesic matrix
         dataset = self.test_loader.dataset
-        geodesic_matrix = dataset.geodesic_matrix
+        geodesic_matrix = dataset.geodesic_matrix.to(self.device)
 
         index_small = torch.le(order_flag_, 0.5)
         index_bigger = torch.gt(order_flag_, 0.5)
