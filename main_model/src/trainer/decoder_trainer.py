@@ -3,6 +3,7 @@ import wandb
 import logging
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from main_model.src.utils.tracker import AverageTracker
@@ -204,103 +205,60 @@ class LEHDTrainer(Solver):
 
     def train_step(self, batch):
         # Extract data from batch
-        problems = batch["problems"]
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
 
-        # Initialize state tracking
-        batch_size = problems.size(0)
-        problem_size = problems.size(1) - 1  # Excluding depot
-
-        # Initialize selected node lists and flags
-        selected_node_list = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_teacher_flag = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_student_list = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_student_flag = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-
         loss_list = []
-        current_step = 0
-
         # Training loop for constructing solution
-        while current_step < problem_size:
-            if current_step == 0:
-                # First step - use teacher's first selection
-                selected_teacher = solutions[:, 0, 0]
-                selected_flag_teacher = solutions[:, 0, 1]
-                selected_student = selected_teacher.clone()
-                selected_flag_student = selected_flag_teacher.clone()
-                loss_mean = torch.tensor(0, device=self.device)
-            else:
-                # Use model to predict next node
-                (
-                    loss_node,
-                    selected_teacher,
-                    selected_student,
-                    selected_flag_teacher,
-                    selected_flag_student,
-                ) = self.model(
-                    problems,
-                    selected_node_list,
-                    solutions,
-                    current_step,
-                    capacities,
-                    mode="train",
-                )
+        while (
+            solutions.size(1) > 3
+        ):  # if solutions.size(1) == 3, only start, destination and depot left
+            logits_node, logits_flag = self.model(
+                solutions,
+                capacities,
+                mode="train",
+            )
 
-                loss_mean = loss_node
+            node_teacher = solutions[:, 1, 1].to(torch.int64)
+            flag_teacher = solutions[:, 1, -1].to(torch.int64)
 
-                # Backpropagate and update model
-                self.model.zero_grad()
-                loss_mean.backward()
+            # calculate the cross entropy loss for the node selection
+            # TODO: Add int conversion somewhere deeper in the model/ loader
+            loss_node = F.cross_entropy(
+                logits_node, node_teacher
+            )  # TODO: Pretty certain but check if 1) need to add -1 and 2) if softmax before
+            loss_flag = F.cross_entropy(logits_flag, flag_teacher)
 
-                self.clip_grad_norm()
+            loss = 0.5 * loss_node + 0.5 * loss_flag
+            loss = loss
 
-                self.optimizer.step()
+            # Backpropagate and update model
+            self.model.zero_grad()
+            loss.backward()
+
+            self.clip_grad_norm()
+            self.optimizer.step()
 
             # Update capacity in problems tensor directly
             # 1. If flag = 1, the vehicle returns to depot and capacity is refilled
-            is_depot = selected_flag_teacher == 1
-            problems[is_depot, :, 3] = capacities[is_depot, None]
+            is_depot = flag_teacher == 1
+            solutions[is_depot, :, 3] = capacities[is_depot, None]
 
             # 2. Get demands of selected nodes using gather
-            gather_index = selected_teacher[:, None, None].expand(
-                (len(selected_teacher), 1, 4)
-            )
-            current_node_temp = problems.gather(index=gather_index, dim=1).squeeze(1)
-            selected_demands = current_node_temp[:, 2]
+            selected_demands = solutions[:, 1, 2]
 
             # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
-            smaller_ = problems[:, 0, 3] < selected_demands
-            selected_flag_teacher[smaller_] = 1
-            problems[smaller_, :, 3] = capacities[smaller_, None]
+            # TODO: Does this ever happen since we are working with the teacher's solution?
+            smaller_ = solutions[:, 0, 3] < selected_demands
+            solutions[smaller_, :, 3] = capacities[smaller_, None]
 
             # 4. Subtract demand from capacity
-            problems[:, :, 3] = problems[:, :, 3] - selected_demands[:, None]
+            solutions[:, :, 3] = solutions[:, :, 3] - selected_demands[:, None]
 
-            # Update tracking lists
-            selected_node_list = torch.cat(
-                (selected_node_list, selected_teacher.unsqueeze(1)), dim=1
-            )
-            selected_teacher_flag = torch.cat(
-                (selected_teacher_flag, selected_flag_teacher.unsqueeze(1)), dim=1
-            )
-            selected_student_list = torch.cat(
-                (selected_student_list, selected_student.unsqueeze(1)), dim=1
-            )
-            selected_student_flag = torch.cat(
-                (selected_student_flag, selected_flag_student.unsqueeze(1)), dim=1
-            )
+            # 5. Update problems tensor for next step
+            solutions = solutions[:, 1:, :]
 
-            current_step += 1
-            loss_list.append(loss_mean)
+            loss_list.append(loss)
 
         # Calculate final loss
         loss_mean = torch.stack(loss_list).mean()

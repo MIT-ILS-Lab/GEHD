@@ -397,11 +397,11 @@ class Solver:
             logger.info(" ")
 
             # testing epoch
-            if epoch % self.config["solver"]["test_every_epoch"] == 0:
-                logger.info(
-                    f'-------------------  TESTING {epoch:3d}/{self.config["solver"]["max_epoch"]:3d}  -------------------'
-                )
-                self.test_epoch(epoch)
+            # if epoch % self.config["solver"]["test_every_epoch"] == 0:
+            #     logger.info(
+            #         f'-------------------  TESTING {epoch:3d}/{self.config["solver"]["max_epoch"]:3d}  -------------------'
+            #     )
+            #     self.test_epoch(epoch)
 
             # checkpoint
             if epoch % self.config["solver"]["save_every_epoch"] == 0:

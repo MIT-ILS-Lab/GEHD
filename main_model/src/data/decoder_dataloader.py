@@ -29,6 +29,35 @@ def tow_col_nodeflag(node_flag):
     return [[int(node_flag[i]), int(node_flag[V + i])] for i in range(V)]
 
 
+def reformat_solution(solution, problem):
+    """
+    Adapts the batch processing for no batching (single sample).
+    """
+
+    # extend the solution array with 0s on the first place
+    reindex_list = torch.cat(
+        (
+            solution[:, 0],
+            torch.zeros((1,), dtype=torch.int),
+        ),
+        dim=0,
+    )
+
+    reindex_flag = torch.cat(
+        (
+            solution[:, 1],
+            torch.zeros((1,), dtype=torch.int),
+        ),
+        dim=0,
+    )
+
+    # orders the problem nodes by the depot and solution indices for future processing
+    solution_extended = problem[reindex_list]
+    # concatenate the flag to the reindexed problems
+    solution_extended = torch.cat((solution_extended, reindex_flag.unsqueeze(1)), dim=1)
+    return solution_extended
+
+
 class LEHDBatchSampler(torch.utils.data.Sampler):
     """
     BatchSampler that groups items into batches where each batch uses a fixed subpath length.
@@ -137,8 +166,9 @@ class LEHDDataset(Dataset):
                 problem, solution, fixed_length=fixed_length
             )
 
+        solution = reformat_solution(solution, problem)
+
         return {
-            "problem": problem,
             "solution": solution,
             "capacity": capacity,
         }
@@ -425,12 +455,10 @@ class LEHDDataset(Dataset):
 
 
 def collate_batch(batch):
-    problems = torch.stack([item["problem"] for item in batch])
     solutions = torch.stack([item["solution"] for item in batch])
     capacities = torch.stack([item["capacity"] for item in batch])
 
     batch_dict = {
-        "problems": problems,
         "solutions": solutions,
         "capacities": capacities.float(),
     }

@@ -31,31 +31,13 @@ solver:
   # wandb
   wandb:
     project_name: "decoder"
-    run_name: "my_decoder_run"
 
 data:
   train:
     mode: "train"
 
     # data loading
-    batch_size: 32
-    num_workers: 4
-    episodes: -1    # -1 means all
-
-    shuffle: true
-
-    # environment
-    env:
-      data_path: "main_model/disk/problems/mesh_cvrp_data_train.h5"
-      sub_path: true
-    # others
-    disable: false
-
-  test:
-    mode: "test"
-
-    # data loading
-    batch_size: 100
+    batch_size: 1
     num_workers: 4
     episodes: -1    # -1 means all
 
@@ -63,7 +45,25 @@ data:
 
     # environment
     env:
-      data_path: "main_model/disk/problems/mesh_cvrp_data_test.h5"
+      data_path: "main_model/disk/problems/city_20/problems_20_test.h5"
+      sub_path: true
+
+    # others
+    disable: false
+
+  test:
+    mode: "test"
+
+    # data loading
+    batch_size: 1
+    num_workers: 4
+    episodes: 100    # -1 means all
+
+    shuffle: false
+
+    # environment
+    env:
+      data_path: "main_model/disk/problems/city_20/problems_20_train.h5"
       sub_path: false
 
     # others
@@ -73,13 +73,13 @@ model:
   embedding_dim: 128
   sqrt_embedding_dim: 11.313708498984761
   decoder_layer_num: 6
-  qkv_dim: 16
+  mesh_size: 10242
   head_num: 8
-  ff_hidden_dim: 512
+  hidden_dim: 512
 
   pretrained_encoder:
     in_channels: 6
     hidden_channels: 256
-    out_channels: 256
-    ckp_path: "main_model/logs/encoder/checkpoints/16000.solver.tar"
+    out_channels: 32
+    ckp_path: "main_model/logs/encoder_32/checkpoints/08000.solver.tar"
     mesh_path: "main_model/disk/meshes/sphere.obj"
