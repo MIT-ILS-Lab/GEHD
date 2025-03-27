@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from main_model.src.utils.general_utils import read_mesh, reindex_problems
+from main_model.src.utils.general_utils import read_mesh
 from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
@@ -11,12 +11,9 @@ class LEHD(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
+
         self.encoder = Encoder(**model_params)
-
-        self.memory = self.encoder.pretrained_gegnn.embds
-        assert self.memory is not None, "Please call compute_embeddings() first!"
-
-        self.decoder_new = DecoderExpand(self.memory, **model_params)
+        self.decoder_new = DecoderCity(**model_params)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -26,68 +23,33 @@ class LEHD(nn.Module):
         self,
         solutions,
         capacities=None,
-        mode="train",
     ):
         # solution's shape : [B, V]
         self.capacity = capacities.ravel()[0].item()
+        memory = self.encoder.pretrained_gegnn.embds  # TODO: Quick fix
 
-        if mode == "train":
+        remaining_capacity = solutions[:, 0, 3]
 
-            remaining_capacity = solutions[:, 0, 3]
+        encoder_out = self.encoder(solutions)
 
-            encoder_out = self.encoder(solutions)
+        encoder_out = torch.cat(
+            (
+                encoder_out,
+                solutions[:, :, 2].unsqueeze(-1) / self.capacity,
+            ),
+            dim=2,
+        )
 
-            encoder_out = torch.cat(
-                (
-                    encoder_out,
-                    solutions[:, :, 2].unsqueeze(-1) / self.capacity,
-                ),
-                dim=2,
-            )
+        # add remaining capacity for the source node TODO: Does it make sense to just leave this as is without this step?
+        encoder_out[:, 0, -1] = remaining_capacity / self.capacity
 
-            # add remaining capacity for the source node TODO: Does it make sense to just leave this as is without this step?
-            encoder_out[:, 0, -1] = remaining_capacity / self.capacity
-
-            # TODO: Check this and how to handle memory
-            logits_node, logits_flag = self.decoder_new(encoder_out)
-
-        # if mode == "test":
-        #     remaining_capacity = problems_reindexed[:, 1, 3]
-
-        #     if current_step <= 1:
-        #         self.encoded_nodes = self.encoder(problems_reindexed, self.capacity)
-
-        #     probs = self.decoder(
-        #         self.encoded_nodes,
-        #         selected_node_list,
-        #         self.capacity,
-        #         remaining_capacity,
-        #     )
-
-        #     selected_node_student = probs.argmax(dim=1)  # shape: B
-        #     is_via_depot_student = selected_node_student >= split_line
-        #     not_via_depot_student = selected_node_student < split_line
-        #     selected_flag_student = torch.zeros(
-        #         batch_size, dtype=torch.int, device=self.device
-        #     )
-        #     selected_flag_student[is_via_depot_student] = 1
-        #     selected_node_student[is_via_depot_student] = (
-        #         selected_node_student[is_via_depot_student] - split_line + 1
-        #     )
-        #     selected_flag_student[not_via_depot_student] = 0
-        #     selected_node_student[not_via_depot_student] = (
-        #         selected_node_student[not_via_depot_student] + 1
-        #     )
-
-        #     selected_node_teacher = selected_node_student
-        #     selected_flag_teacher = selected_flag_student
-
-        #     loss_node = torch.tensor(0)
+        # TODO: Check this and how to handle memory
+        logits_node, logits_flag = self.decoder_new(encoder_out, memory)
 
         return logits_node, logits_flag
 
 
-class DecoderPart(nn.Module):
+class DecoderCityHelp(nn.Module):
     def __init__(
         self,
         input_dim,
@@ -97,7 +59,7 @@ class DecoderPart(nn.Module):
         output_dim=10000,
         decision_dim=2,
     ):
-        super(DecoderPart, self).__init__()
+        super(DecoderCityHelp, self).__init__()
 
         # Linear projection layer to map input to correct dimension
         self.input_projection = nn.Linear(input_dim, input_dim)
@@ -141,14 +103,12 @@ class DecoderPart(nn.Module):
         return output_tensor, decision_tensor
 
 
-class DecoderExpand(nn.Module):
-    def __init__(self, memory, **model_params):
+class DecoderCity(nn.Module):
+    def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
         embedding_dim = self.model_params["embedding_dim"]
         embedding_dim = 32
-
-        self.memory = memory.detach()
 
         self.embedd_source = nn.Linear(embedding_dim + 1, embedding_dim, bias=True)
         self.embedding_destination = nn.Linear(
@@ -159,18 +119,18 @@ class DecoderExpand(nn.Module):
             embedding_dim + 1, embedding_dim, bias=True
         )
 
-        self.decoder = DecoderPart(
+        self.decoder = DecoderCityHelp(
             input_dim=embedding_dim,
             hidden_dim=model_params["hidden_dim"],
             num_heads=model_params["head_num"],
             num_layers=model_params["decoder_layer_num"],
-            output_dim=model_params["mesh_size"],
+            output_dim=model_params["city_size"],
             decision_dim=2,
         )
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def forward(self, encoded_problems_reindexed):
+    def forward(self, encoded_problems_reindexed, memory):
         source = encoded_problems_reindexed[:, [0], :]
         candidates = encoded_problems_reindexed[:, 1:-2, :]
         destination = encoded_problems_reindexed[:, [-2], :]
@@ -184,7 +144,7 @@ class DecoderExpand(nn.Module):
 
         # TODO: think about having depot, source and destination in the memory (or at least the depot)
         decoder_input = torch.cat((depot, source, candidates, destination), dim=1)
-        logits_student, logits_flag = self.decoder(decoder_input, self.memory)
+        logits_student, logits_flag = self.decoder(decoder_input, memory)
 
         return logits_student, logits_flag
 
@@ -252,8 +212,11 @@ class Encoder(nn.Module):
             bias=True,
         )
 
+    def prepare_embedding(self, city_indexes):
+        self.pretrained_gegnn.embds = self.pretrained_gegnn.embds[city_indexes]
+
     def forward(self, problems):
-        out = self.pretrained_gegnn(problems[:, :, 1].to(torch.int64))
+        out = self.pretrained_gegnn(problems[:, :, 0].to(torch.int64))
         return out
 
 
@@ -294,250 +257,250 @@ class EncoderLayer(nn.Module):
         # shape: (batch, problem, EMBEDDING_DIM)
 
 
-# class Decoder(nn.Module):
-#     def __init__(self, **model_params):
-#         super().__init__()
-#         self.model_params = model_params
-#         embedding_dim = self.model_params["embedding_dim"]
-#         decoder_layer_num = self.model_params["decoder_layer_num"]
+class DecoderMLP(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        self.model_params = model_params
+        embedding_dim = self.model_params["embedding_dim"]
+        decoder_layer_num = self.model_params["decoder_layer_num"]
 
-#         self.embedding_first_node = nn.Linear(
-#             embedding_dim + 1, embedding_dim, bias=True
-#         )
-#         self.embedding_last_node = nn.Linear(
-#             embedding_dim + 1, embedding_dim, bias=True
-#         )
+        self.embedding_first_node = nn.Linear(
+            embedding_dim + 1, embedding_dim, bias=True
+        )
+        self.embedding_last_node = nn.Linear(
+            embedding_dim + 1, embedding_dim, bias=True
+        )
 
-#         self.layers = nn.ModuleList(
-#             [DecoderLayer(**model_params) for _ in range(decoder_layer_num)]
-#         )
-#         self.Linear_final = nn.Linear(embedding_dim, 2, bias=True)
+        self.layers = nn.ModuleList(
+            [DecoderLayer(**model_params) for _ in range(decoder_layer_num)]
+        )
+        self.Linear_final = nn.Linear(embedding_dim, 2, bias=True)
 
-#         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#     def _get_new_data(self, data, selected_node_list, prob_size, B_V):
-#         list = selected_node_list
+    def _get_new_data(self, data, selected_node_list, prob_size, B_V):
+        list = selected_node_list
 
-#         new_list = torch.arange(prob_size)[None, :].repeat(B_V, 1)
+        new_list = torch.arange(prob_size)[None, :].repeat(B_V, 1)
 
-#         new_list_len = prob_size - list.shape[1]  # shape: [B, V-current_step]
+        new_list_len = prob_size - list.shape[1]  # shape: [B, V-current_step]
 
-#         index_2 = list.type(torch.long)
+        index_2 = list.type(torch.long)
 
-#         index_1 = torch.arange(B_V, dtype=torch.long)[:, None].expand(
-#             B_V, index_2.shape[1]
-#         )
+        index_1 = torch.arange(B_V, dtype=torch.long)[:, None].expand(
+            B_V, index_2.shape[1]
+        )
 
-#         new_list[index_1, index_2] = -2
+        new_list[index_1, index_2] = -2
 
-#         unselect_list = new_list[torch.gt(new_list, -1)].view(B_V, new_list_len)
+        unselect_list = new_list[torch.gt(new_list, -1)].view(B_V, new_list_len)
 
-#         new_data = data
+        new_data = data
 
-#         emb_dim = data.shape[-1]
+        emb_dim = data.shape[-1]
 
-#         new_data_len = new_list_len
+        new_data_len = new_list_len
 
-#         index_2_ = unselect_list.repeat_interleave(repeats=emb_dim, dim=1)
+        index_2_ = unselect_list.repeat_interleave(repeats=emb_dim, dim=1)
 
-#         index_1_ = torch.arange(B_V, dtype=torch.long)[:, None].expand(
-#             B_V, index_2_.shape[1]
-#         )
+        index_1_ = torch.arange(B_V, dtype=torch.long)[:, None].expand(
+            B_V, index_2_.shape[1]
+        )
 
-#         index_3_ = torch.arange(emb_dim)[None, :].repeat(repeats=(B_V, new_data_len))
+        index_3_ = torch.arange(emb_dim)[None, :].repeat(repeats=(B_V, new_data_len))
 
-#         new_data_ = new_data[index_1_, index_2_, index_3_].view(
-#             B_V, new_data_len, emb_dim
-#         )
+        new_data_ = new_data[index_1_, index_2_, index_3_].view(
+            B_V, new_data_len, emb_dim
+        )
 
-#         return new_data_.to(self.device)
+        return new_data_.to(self.device)
 
-#     def _get_encoding(self, encoded_nodes, node_index_to_pick):
+    def _get_encoding(self, encoded_nodes, node_index_to_pick):
 
-#         batch_size = node_index_to_pick.size(0)
-#         pomo_size = node_index_to_pick.size(1)
-#         embedding_dim = encoded_nodes.size(2)
+        batch_size = node_index_to_pick.size(0)
+        pomo_size = node_index_to_pick.size(1)
+        embedding_dim = encoded_nodes.size(2)
 
-#         gathering_index = node_index_to_pick[:, :, None].expand(
-#             batch_size, pomo_size, embedding_dim
-#         )
+        gathering_index = node_index_to_pick[:, :, None].expand(
+            batch_size, pomo_size, embedding_dim
+        )
 
-#         picked_nodes = encoded_nodes.gather(dim=1, index=gathering_index)
+        picked_nodes = encoded_nodes.gather(dim=1, index=gathering_index)
 
-#         return picked_nodes
+        return picked_nodes
 
-#     def forward(self, data, selected_node_list, capacity, remaining_capacity):
+    def forward(self, data, selected_node_list, capacity, remaining_capacity):
 
-#         data_ = data[:, 1:, :].clone().detach()
-#         selected_node_list_ = selected_node_list.clone().detach() - 1
+        data_ = data[:, 1:, :].clone().detach()
+        selected_node_list_ = selected_node_list.clone().detach() - 1
 
-#         batch_size_V = data_.shape[0]  # B
+        batch_size_V = data_.shape[0]  # B
 
-#         problem_size = data_.shape[1]
+        problem_size = data_.shape[1]
 
-#         new_data = data_.clone().detach()
+        new_data = data_.clone().detach()
 
-#         left_encoded_node = self._get_new_data(
-#             new_data, selected_node_list_, problem_size, batch_size_V
-#         )
+        left_encoded_node = self._get_new_data(
+            new_data, selected_node_list_, problem_size, batch_size_V
+        )
 
-#         embedded_first_node = data[:, [0], :]
+        embedded_first_node = data[:, [0], :]
 
-#         if selected_node_list_.shape[1] == 0:
-#             embedded_last_node = data[:, [0], :]
-#         else:
-#             embedded_last_node = self._get_encoding(
-#                 new_data, selected_node_list_[:, [-1]]
-#             )
+        if selected_node_list_.shape[1] == 0:
+            embedded_last_node = data[:, [0], :]
+        else:
+            embedded_last_node = self._get_encoding(
+                new_data, selected_node_list_[:, [-1]]
+            )
 
-#         remaining_capacity = remaining_capacity.reshape(batch_size_V, 1, 1) / capacity
-#         first_node_cat = torch.cat((embedded_first_node, remaining_capacity), dim=2)
-#         last_node_cat = torch.cat((embedded_last_node, remaining_capacity), dim=2)
-#         # ------------------------------------------------
-#         # ------------------------------------------------
+        remaining_capacity = remaining_capacity.reshape(batch_size_V, 1, 1) / capacity
+        first_node_cat = torch.cat((embedded_first_node, remaining_capacity), dim=2)
+        last_node_cat = torch.cat((embedded_last_node, remaining_capacity), dim=2)
+        # ------------------------------------------------
+        # ------------------------------------------------
 
-#         embedded_first_node_ = self.embedding_first_node(first_node_cat)
+        embedded_first_node_ = self.embedding_first_node(first_node_cat)
 
-#         embedded_last_node_ = self.embedding_last_node(last_node_cat)
+        embedded_last_node_ = self.embedding_last_node(last_node_cat)
 
-#         embeded_all = torch.cat(
-#             (embedded_first_node_, left_encoded_node, embedded_last_node_), dim=1
-#         )
-#         out = embeded_all  # [B*(V-1), problem_size - current_step +2, embedding_dim]
+        embeded_all = torch.cat(
+            (embedded_first_node_, left_encoded_node, embedded_last_node_), dim=1
+        )
+        out = embeded_all  # [B*(V-1), problem_size - current_step +2, embedding_dim]
 
-#         layer_count = 0
+        layer_count = 0
 
-#         for layer in self.layers:
+        for layer in self.layers:
 
-#             out = layer(out)
-#             layer_count += 1
+            out = layer(out)
+            layer_count += 1
 
-#         out = self.Linear_final(
-#             out
-#         )  # shape: [B*(V-1), reminding_nodes_number + 2, embedding_dim ]
+        out = self.Linear_final(
+            out
+        )  # shape: [B*(V-1), reminding_nodes_number + 2, embedding_dim ]
 
-#         out[:, [0, -1], :] = out[:, [0, -1], :] + float("-inf")  # first node、last node
+        out[:, [0, -1], :] = out[:, [0, -1], :] + float("-inf")  # first node、last node
 
-#         out = torch.cat(
-#             (out[:, :, 0], out[:, :, 1]), dim=1
-#         )  # shape:(B, 2 * ( V - current_step ))
+        out = torch.cat(
+            (out[:, :, 0], out[:, :, 1]), dim=1
+        )  # shape:(B, 2 * ( V - current_step ))
 
-#         props = F.softmax(out, dim=-1)
-#         customer_num = left_encoded_node.shape[1]
+        props = F.softmax(out, dim=-1)
+        customer_num = left_encoded_node.shape[1]
 
-#         props = torch.cat(
-#             (props[:, 1 : customer_num + 1], props[:, customer_num + 1 + 1 + 1 : -1]),
-#             dim=1,
-#         )
+        props = torch.cat(
+            (props[:, 1 : customer_num + 1], props[:, customer_num + 1 + 1 + 1 : -1]),
+            dim=1,
+        )
 
-#         index_small = torch.le(props, 1e-5)
-#         props_clone = props.clone()
-#         props_clone[index_small] = props_clone[index_small] + torch.tensor(
-#             1e-7, dtype=props_clone[index_small].dtype, device=self.device
-#         )
-#         props = props_clone
+        index_small = torch.le(props, 1e-5)
+        props_clone = props.clone()
+        props_clone[index_small] = props_clone[index_small] + torch.tensor(
+            1e-7, dtype=props_clone[index_small].dtype, device=self.device
+        )
+        props = props_clone
 
-#         new_props = torch.zeros(batch_size_V, 2 * (problem_size), device=self.device)
+        new_props = torch.zeros(batch_size_V, 2 * (problem_size), device=self.device)
 
-#         # The function of the following part is to fill the probability of props into the new_props,
-#         index_1_ = torch.arange(batch_size_V, dtype=torch.long)[:, None].repeat(
-#             1, selected_node_list_.shape[1] * 2
-#         )
-#         index_2_ = torch.cat(
-#             (
-#                 (selected_node_list_).type(torch.long),
-#                 (problem_size) + (selected_node_list_).type(torch.long),
-#             ),
-#             dim=-1,
-#         )  # shape: [B*V, n]
-#         new_props[
-#             index_1_,
-#             index_2_,
-#         ] = -2
-#         index = torch.gt(new_props, -1).view(batch_size_V, -1)
-#         new_props[index] = props.ravel()
+        # The function of the following part is to fill the probability of props into the new_props,
+        index_1_ = torch.arange(batch_size_V, dtype=torch.long)[:, None].repeat(
+            1, selected_node_list_.shape[1] * 2
+        )
+        index_2_ = torch.cat(
+            (
+                (selected_node_list_).type(torch.long),
+                (problem_size) + (selected_node_list_).type(torch.long),
+            ),
+            dim=-1,
+        )  # shape: [B*V, n]
+        new_props[
+            index_1_,
+            index_2_,
+        ] = -2
+        index = torch.gt(new_props, -1).view(batch_size_V, -1)
+        new_props[index] = props.ravel()
 
-#         return new_props
+        return new_props
 
 
-# class DecoderLayer(nn.Module):
-#     def __init__(self, **model_params):
-#         super().__init__()
-#         self.model_params = model_params
-#         embedding_dim = self.model_params["embedding_dim"]
-#         head_num = self.model_params["head_num"]
-#         qkv_dim = self.model_params["qkv_dim"]
+class DecoderLayer(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        self.model_params = model_params
+        embedding_dim = self.model_params["embedding_dim"]
+        head_num = self.model_params["head_num"]
+        qkv_dim = self.model_params["qkv_dim"]
 
-#         self.Wq = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-#         self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-#         self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-#         self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
-#         self.feedForward = Feed_Forward_Module(**model_params)
+        self.Wq = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
+        self.feedForward = Feed_Forward_Module(**model_params)
 
-#     def forward(self, input1):
+    def forward(self, input1):
 
-#         head_num = self.model_params["head_num"]
+        head_num = self.model_params["head_num"]
 
-#         q = reshape_by_heads(self.Wq(input1), head_num=head_num)
-#         k = reshape_by_heads(self.Wk(input1), head_num=head_num)
-#         v = reshape_by_heads(self.Wv(input1), head_num=head_num)
+        q = reshape_by_heads(self.Wq(input1), head_num=head_num)
+        k = reshape_by_heads(self.Wk(input1), head_num=head_num)
+        v = reshape_by_heads(self.Wv(input1), head_num=head_num)
 
-#         out_concat = multi_head_attention(q, k, v)
+        out_concat = multi_head_attention(q, k, v)
 
-#         multi_head_out = self.multi_head_combine(out_concat)
+        multi_head_out = self.multi_head_combine(out_concat)
 
-#         out1 = input1 + multi_head_out
-#         out2 = self.feedForward(out1)
-#         out3 = out1 + out2
-#         return out3
+        out1 = input1 + multi_head_out
+        out2 = self.feedForward(out1)
+        out3 = out1 + out2
+        return out3
 
 
-# def reshape_by_heads(qkv, head_num):
+def reshape_by_heads(qkv, head_num):
 
-#     batch_s = qkv.size(0)
+    batch_s = qkv.size(0)
 
-#     n = qkv.size(1)
+    n = qkv.size(1)
 
-#     q_reshaped = qkv.reshape(batch_s, n, head_num, -1)
+    q_reshaped = qkv.reshape(batch_s, n, head_num, -1)
 
-#     q_transposed = q_reshaped.transpose(1, 2)
+    q_transposed = q_reshaped.transpose(1, 2)
 
-#     return q_transposed
+    return q_transposed
 
 
-# def multi_head_attention(q, k, v):
+def multi_head_attention(q, k, v):
 
-#     batch_s = q.size(0)
-#     head_num = q.size(1)
-#     n = q.size(2)
-#     key_dim = q.size(3)
+    batch_s = q.size(0)
+    head_num = q.size(1)
+    n = q.size(2)
+    key_dim = q.size(3)
 
-#     score = torch.matmul(q, k.transpose(2, 3))  # shape: (B, head_num, n, n)
+    score = torch.matmul(q, k.transpose(2, 3))  # shape: (B, head_num, n, n)
 
-#     score_scaled = score / torch.sqrt(torch.tensor(key_dim, dtype=torch.float))
+    score_scaled = score / torch.sqrt(torch.tensor(key_dim, dtype=torch.float))
 
-#     weights = nn.Softmax(dim=3)(score_scaled)  # shape: (B, head_num, n, n)
+    weights = nn.Softmax(dim=3)(score_scaled)  # shape: (B, head_num, n, n)
 
-#     out = torch.matmul(weights, v)  # shape: (B, head_num, n, key_dim)
+    out = torch.matmul(weights, v)  # shape: (B, head_num, n, key_dim)
 
-#     out_transposed = out.transpose(1, 2)  # shape: (B, n, head_num, key_dim)
+    out_transposed = out.transpose(1, 2)  # shape: (B, n, head_num, key_dim)
 
-#     out_concat = out_transposed.reshape(
-#         batch_s, n, head_num * key_dim
-#     )  # shape: (B, n, head_num*key_dim)
+    out_concat = out_transposed.reshape(
+        batch_s, n, head_num * key_dim
+    )  # shape: (B, n, head_num*key_dim)
 
-#     return out_concat
+    return out_concat
 
 
-# class Feed_Forward_Module(nn.Module):
-#     def __init__(self, **model_params):
-#         super().__init__()
-#         embedding_dim = model_params["embedding_dim"]
-#         ff_hidden_dim = model_params["ff_hidden_dim"]
+class Feed_Forward_Module(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        embedding_dim = model_params["embedding_dim"]
+        ff_hidden_dim = model_params["ff_hidden_dim"]
 
-#         self.W1 = nn.Linear(embedding_dim, ff_hidden_dim)
-#         self.W2 = nn.Linear(ff_hidden_dim, embedding_dim)
+        self.W1 = nn.Linear(embedding_dim, ff_hidden_dim)
+        self.W2 = nn.Linear(ff_hidden_dim, embedding_dim)
 
-#     def forward(self, input1):
+    def forward(self, input1):
 
-#         return self.W2(F.relu(self.W1(input1)))
+        return self.W2(F.relu(self.W1(input1)))
