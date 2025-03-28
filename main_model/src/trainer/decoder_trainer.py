@@ -397,9 +397,9 @@ class LEHDTrainer(Solver):
             selected_demands = solutions[:, 1, 2]
 
             # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
-            # TODO: Does this ever happen since we are working with the teacher's solution?
             smaller_ = solutions[:, 0, 3] < selected_demands
             solutions[smaller_, :, 3] = capacities[smaller_, None]
+            flag_student[smaller_] = 1
 
             # 4. Subtract demand from capacity
             solutions[:, :, 3] = solutions[:, :, 3] - selected_demands[:, None]
