@@ -425,6 +425,7 @@ class LEHDTrainer(Solver):
                 (selected_student_flag, flag_student.unsqueeze(1)), dim=1
             )
 
+        # Add target location to the solution
         selected_student_list = torch.cat(
             (selected_student_list, solutions[:, -2, 0].unsqueeze(1)), dim=1
         )
@@ -434,8 +435,12 @@ class LEHDTrainer(Solver):
 
         # Calculate optimal and student scores
         optimal_length = self.get_travel_distance(
-            solutions_orig[:, :, 0].clone().to(torch.int64),
-            solutions_orig[:, :, 4].clone().to(torch.int64),
+            solutions_orig[:, :-1, 0]
+            .clone()
+            .to(torch.int64),  # exclude depot from the solution vector
+            solutions_orig[:, :-1, 4]
+            .clone()
+            .to(torch.int64),  # exclude depot from the solution vector
         )
         current_best_length = self.get_travel_distance(
             selected_student_list.clone().to(torch.int64),
@@ -443,11 +448,7 @@ class LEHDTrainer(Solver):
         )
 
         # Calculate gap as percentage
-        gap = (
-            (current_best_length.mean() - optimal_length.mean())
-            / optimal_length.mean()
-            * 100
-        )
+        gap = 100 * ((current_best_length - optimal_length) / optimal_length).mean()
 
         # Return output dictionary for tracker
         return {
@@ -476,7 +477,7 @@ class LEHDTrainer(Solver):
 
         order_loc = order_node_
         roll_loc = roll_node
-        flag_loc = order_flag
+        flag_loc = order_flag_
 
         order_lengths = geodesic_matrix[order_loc, flag_loc]
 
@@ -486,6 +487,6 @@ class LEHDTrainer(Solver):
 
         roll_lengths = geodesic_matrix[roll_loc, flag_loc]
 
-        length = order_lengths.sum() + roll_lengths.sum()
+        length = order_lengths.sum(dim=1) + roll_lengths.sum(dim=1)
 
         return length

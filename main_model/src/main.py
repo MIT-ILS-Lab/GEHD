@@ -9,7 +9,7 @@ from main_model.src.trainer.decoder_trainer import LEHDTrainer
 torch.backends.cudnn.benchmark = True
 
 # Set the type of model to run, either "encoder" or "decoder"
-TYPE = "encoder"
+TYPE = "decoder"
 
 
 ####################################################################################################
@@ -50,7 +50,7 @@ if __name__ == "__main__":
 
     # Pretty-print the config using YAML formatting
     logging.info(
-        f"Loaded configuration from {config}:\n{yaml.dump(config, default_flow_style=False, sort_keys=False)}"
+        f"Loaded configuration from {path}:\n{yaml.dump(config, default_flow_style=False, sort_keys=False)}"
     )
 
     solver = model(config)
