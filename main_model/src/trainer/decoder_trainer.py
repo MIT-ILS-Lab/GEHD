@@ -416,7 +416,7 @@ class LEHDTrainer(Solver):
             solutions = solutions.view(batch_size, -1, solutions.size(1))
 
             # switch the solution and move the student node indexes to the first entry
-            solutions = torch.cat((start_node, solutions), dim=1)
+            solutions = torch.cat((start_node, solutions[:, 1:]), dim=1)
 
             selected_student_list = torch.cat(
                 (selected_student_list, node_student.unsqueeze(1)), dim=1
@@ -432,23 +432,14 @@ class LEHDTrainer(Solver):
             (selected_student_flag, solutions[:, -2, -1].unsqueeze(1)), dim=1
         )
 
-        # Combine node and flag information for final solution
-        best_select_node_list = torch.cat(
-            (selected_student_list.unsqueeze(2), selected_student_flag.unsqueeze(2)),
-            dim=2,
-        )
-
         # Calculate optimal and student scores
-        optimal_length = self._get_travel_distance(
-            torch.cat(
-                (
-                    solutions_orig.unsqueeze(2),
-                    solutions_orig.unsqueeze(2),
-                ),
-                dim=2,
-            ),
+        optimal_length = self.get_travel_distance(
+            solutions_orig[:, :, 0].clone().to(torch.int64),
+            solutions_orig[:, :, 4].clone().to(torch.int64),
         )
-        current_best_length = self._get_travel_distance(best_select_node_list)
+        current_best_length = self.get_travel_distance(
+            selected_student_list.clone(), selected_student_flag
+        )
 
         # Calculate gap as percentage
         gap = (
@@ -464,18 +455,7 @@ class LEHDTrainer(Solver):
             "test/gap_percentage": gap,
         }
 
-    def _get_travel_distance(self, solution_):
-        """
-        Calculate the travel distance for a given solution.
-        """
-        order_node = solution_[:, :, 0].clone()
-        order_flag = solution_[:, :, 1].clone()
-        travel_distances = self.cal_length(order_node, order_flag)
-
-        return travel_distances
-
-    def cal_length(self, order_node, order_flag):
-        # problems:   [B,V+1,2]
+    def get_travel_distance(self, order_node, order_flag):
         # order_node: [B,V]
         # order_flag: [B,V]
         order_node_ = order_node.clone()
