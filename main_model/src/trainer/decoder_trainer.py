@@ -438,7 +438,8 @@ class LEHDTrainer(Solver):
             solutions_orig[:, :, 4].clone().to(torch.int64),
         )
         current_best_length = self.get_travel_distance(
-            selected_student_list.clone(), selected_student_flag
+            selected_student_list.clone().to(torch.int64),
+            selected_student_flag.clone().to(torch.int64),
         )
 
         # Calculate gap as percentage
