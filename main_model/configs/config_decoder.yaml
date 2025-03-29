@@ -9,14 +9,18 @@ solver:
   log_per_iter: 1
 
   # optimizer
-  type: "adam"
-  weight_decay: 0.0
-  lr: 1.0e-4
+  type: "adamw"
+  weight_decay: 0.01  # default value of adamw
+  lr: 0.00025
+  # lr: 1.0e-4
 
-  # learning rate
-  lr_type: "step"
-  milestones: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]
-  gamma: 0.9
+  # scheduler
+  # lr_type: "knee"
+  # warmup_steps: 1
+
+  lr_type: "poly"
+  lr_power: 0.9
+
 
   # gradient accumulation
   accumulation_steps: 1
@@ -37,15 +41,15 @@ data:
     mode: "train"
 
     # data loading
-    batch_size: 1
+    batch_size: 16
     num_workers: 4
-    episodes: -1    # -1 means all
+    episodes: 1000    # -1 means all
 
-    shuffle: false
+    shuffle: true
 
     # environment
     env:
-      data_path: "main_model/disk/problems/city_20/problems_20_test.h5"
+      data_path: "main_model/disk/problems/city_20/problems_20_train.h5"
       sub_path: true
 
     # others
@@ -55,7 +59,7 @@ data:
     mode: "test"
 
     # data loading
-    batch_size: 1
+    batch_size: 8
     num_workers: 4
     episodes: 100    # -1 means all
 
@@ -63,7 +67,7 @@ data:
 
     # environment
     env:
-      data_path: "main_model/disk/problems/city_20/problems_20_train.h5"
+      data_path: "main_model/disk/problems/city_20/problems_20_test.h5"
       sub_path: false
 
     # others
@@ -73,7 +77,7 @@ model:
   embedding_dim: 128
   sqrt_embedding_dim: 11.313708498984761
   decoder_layer_num: 6
-  mesh_size: 10242
+  city_size: 21
   head_num: 8
   hidden_dim: 512
 
