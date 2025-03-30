@@ -5,7 +5,57 @@ import numpy as np
 from tqdm import tqdm
 import logging
 
+import multiprocessing as mp
+from functools import partial
+
 logger = logging.getLogger(__name__)
+
+
+def process_problem(hf_path, i):
+    """Top-level function to process a single problem."""
+    with h5py.File(hf_path, "r") as hf:
+        problem = hf["problems"][i]
+        demand = hf["demands"][i]
+        capacity = hf["capacities"][i]
+        distance = hf["distances"][i]
+        node_flag = tow_col_nodeflag(hf["node_flags"][i])
+    return problem.tolist(), int(capacity), demand.tolist(), float(distance), node_flag
+
+
+# TODO: Take this from utils
+def tow_col_nodeflag(node_flag):
+    """Convert one-row node_flag to two-column format."""
+    V = int(len(node_flag) / 2)
+    return [[int(node_flag[i]), int(node_flag[V + i])] for i in range(V)]
+
+
+def reformat_solution(solution, problem):
+    """
+    Adapts the batch processing for no batching (single sample).
+    """
+
+    # extend the solution array with 0s on the first place
+    reindex_list = torch.cat(
+        (
+            solution[:, 0],
+            torch.zeros((1,), dtype=torch.int),
+        ),
+        dim=0,
+    )
+
+    reindex_flag = torch.cat(
+        (
+            solution[:, 1],
+            torch.zeros((1,), dtype=torch.int),
+        ),
+        dim=0,
+    )
+
+    # orders the problem nodes by the depot and solution indices for future processing
+    solution_extended = problem[reindex_list]
+    # concatenate the flag to the reindexed problems
+    solution_extended = torch.cat((solution_extended, reindex_flag.unsqueeze(1)), dim=1)
+    return solution_extended
 
 
 class LEHDBatchSampler(torch.utils.data.Sampler):
@@ -14,7 +64,9 @@ class LEHDBatchSampler(torch.utils.data.Sampler):
     This ensures all items in a batch have the same sequence length.
     """
 
-    def __init__(self, dataset_size, problem_size, batch_size, drop_last=False):
+    def __init__(
+        self, dataset_size, problem_size, batch_size, shuffle, drop_last=False
+    ):
         self.dataset_size = dataset_size
         self.problem_size = problem_size
         self.batch_size = batch_size
@@ -22,18 +74,23 @@ class LEHDBatchSampler(torch.utils.data.Sampler):
         self.num_batches = dataset_size // batch_size
         if not drop_last and dataset_size % batch_size != 0:
             self.num_batches += 1
+        self.shuffle = shuffle
 
     def __len__(self):
         return self.num_batches
 
     def __iter__(self):
         # Create random indices
-        indices = torch.randperm(self.dataset_size).tolist()
+        if self.shuffle:
+            indices = torch.randperm(self.dataset_size).tolist()
+        else:
+            indices = list(range(self.dataset_size))
 
         # Yield batches
         for i in range(0, self.dataset_size, self.batch_size):
-            batch_indices = indices[i : i + self.batch_size]
+            batch_indices = indices[i : min(i + self.batch_size, self.dataset_size)]
 
+            # TODO: What is this doing?
             if self.drop_last and len(batch_indices) < self.batch_size:
                 continue
 
@@ -59,9 +116,7 @@ class InfiniteLEHDBatchSampler:
 
 
 class LEHDDataset(Dataset):
-    def __init__(
-        self, data_path, mode="train", episodes=100, sub_path=False
-    ):
+    def __init__(self, data_path, mode="train", episodes=100, sub_path=False):
         self.data_path = data_path
         self.mode = mode
         self.episodes = episodes
@@ -82,10 +137,9 @@ class LEHDDataset(Dataset):
         fixed_length = args[1]
 
         # Get problem indices
-        problem_indices = self.raw_data_problems[idx]
+        problems = self.raw_data_problems[idx]
 
-        # Get true indices from mesh city
-        problem_true_indices = self.city_indices[problem_indices]
+        city_problems = self.city_indices[problems]
 
         # Get node coordinates from mesh city using problem indices
         # nodes = self.city[problem_indices]
@@ -98,8 +152,8 @@ class LEHDDataset(Dataset):
         capacity_expanded = capacity.unsqueeze(0).repeat(solution.shape[0] + 1)
         problem = torch.cat(
             (
-                problem_indices.unsqueeze(-1),
-                problem_true_indices.unsqueeze(-1),
+                problems.unsqueeze(-1),
+                city_problems.unsqueeze(-1),
                 demand.unsqueeze(-1),
                 capacity_expanded.unsqueeze(-1),
             ),
@@ -112,8 +166,9 @@ class LEHDDataset(Dataset):
                 problem, solution, fixed_length=fixed_length
             )
 
+        solution = reformat_solution(solution, problem)
+
         return {
-            "problem": problem,
             "solution": solution,
             "capacity": capacity,
         }
@@ -125,9 +180,7 @@ class LEHDDataset(Dataset):
             self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False)
             self.faces = torch.tensor(hf["faces"][:], requires_grad=False)
             self.city = torch.tensor(hf["city"][:], requires_grad=False)
-            self.city_indices = torch.tensor(
-                hf["city_indices"][:], requires_grad=False
-            )
+            self.city_indices = torch.tensor(hf["city_indices"][:], requires_grad=False)
             self.geodesic_matrix = torch.tensor(
                 hf["geodesic_matrix"][:], requires_grad=False
             )
@@ -137,65 +190,49 @@ class LEHDDataset(Dataset):
     def load_raw_data(self, episode=1000000):
         logging.info(f"Start loading {self.mode} dataset from HDF5 file...")
 
-        # Helper function to convert one-row node_flag to two-column format
-        def tow_col_nodeflag(node_flag):
-            tow_col_node_flag = []
-            V = int(len(node_flag) / 2)
-            for i in range(V):
-                tow_col_node_flag.append([int(node_flag[i]), int(node_flag[V + i])])
-            return tow_col_node_flag
-
         assert self.data_path.endswith(".h5"), "Data file must be in HDF5 format"
 
         with h5py.File(self.data_path, "r") as hf:
-            # Determine how many problems to load
             total_problems = len(hf["problems"])
-            if episode == -1:
-                num_problems = total_problems
-            else:
-                num_problems = min(episode, total_problems)
-
-            # Initialize lists for data
-            self.raw_data_capacity = []
-            self.raw_data_demand = []
-            self.raw_data_cost = []
-            self.raw_data_node_flag = []
-            self.raw_data_problems = []  # Store the problem indices
-
-            # Load problems
-            for i in tqdm(range(num_problems), desc=f"Loading {self.mode} data"):
-                # Get problem data
-                problem = hf["problems"][i]
-                demand = hf["demands"][i]
-                capacity = hf["capacities"][i]
-                distance = hf["distances"][i]
-                node_flag = hf["node_flags"][i]
-
-                # Convert node_flag to two-column format
-                node_flag = tow_col_nodeflag(node_flag)
-
-                self.raw_data_problems.append(problem.tolist())
-                self.raw_data_capacity.append(int(capacity))
-                self.raw_data_demand.append(demand.tolist())
-                self.raw_data_cost.append(float(distance))
-                self.raw_data_node_flag.append(node_flag)
-
-            # Convert to tensors
-            self.raw_data_problems = torch.tensor(
-                self.raw_data_problems, requires_grad=False
+            num_problems = (
+                total_problems if episode == -1 else min(episode, total_problems)
             )
-            self.raw_data_capacity = torch.tensor(
-                self.raw_data_capacity, requires_grad=False
+
+        logging.info(f"Loading {num_problems} problems from {self.data_path}...")
+
+        # Use multiprocessing to load data in parallel
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            results = list(
+                tqdm(
+                    pool.imap(
+                        partial(process_problem, self.data_path), range(num_problems)
+                    ),
+                    total=num_problems,
+                    desc=f"Loading {self.mode} data",
+                )
             )
-            self.raw_data_demand = torch.tensor(
-                self.raw_data_demand, requires_grad=False
-            )
-            self.raw_data_cost = torch.tensor(
-                self.raw_data_cost, requires_grad=False
-            )
-            self.raw_data_node_flag = torch.tensor(
-                self.raw_data_node_flag, requires_grad=False
-            )
+
+        # Unpack results into separate lists
+        (
+            self.raw_data_problems,
+            self.raw_data_capacity,
+            self.raw_data_demand,
+            self.raw_data_cost,
+            self.raw_data_node_flag,
+        ) = zip(*results)
+
+        # Convert lists to tensors
+        self.raw_data_problems = torch.tensor(
+            self.raw_data_problems, requires_grad=False
+        )
+        self.raw_data_capacity = torch.tensor(
+            self.raw_data_capacity, requires_grad=False
+        )
+        self.raw_data_demand = torch.tensor(self.raw_data_demand, requires_grad=False)
+        self.raw_data_cost = torch.tensor(self.raw_data_cost, requires_grad=False)
+        self.raw_data_node_flag = torch.tensor(
+            self.raw_data_node_flag, requires_grad=False
+        )
 
         logging.info(
             f"Loading {self.mode} dataset done! Loaded {len(self.raw_data_capacity)} problems."
@@ -418,18 +455,15 @@ class LEHDDataset(Dataset):
 
 
 def collate_batch(batch):
-    problems = torch.stack([item["problem"] for item in batch])
     solutions = torch.stack([item["solution"] for item in batch])
     capacities = torch.stack([item["capacity"] for item in batch])
 
     batch_dict = {
-        "problems": problems,
         "solutions": solutions,
         "capacities": capacities.float(),
     }
 
     return batch_dict
-
 
 
 def get_dataset(config):

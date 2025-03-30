@@ -1,6 +1,12 @@
+import time
+import wandb
+import logging
+
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
+
+from main_model.src.utils.tracker import AverageTracker
 
 from main_model.src.architecture.decoder_architecture import LEHD
 from main_model.src.trainer.base_trainer import Solver
@@ -9,6 +15,48 @@ from main_model.src.data.decoder_dataloader import (
     InfiniteLEHDBatchSampler,
     get_dataset,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def mask_logits(logits_node, solutions):
+    batch_size, seq_len = logits_node.shape
+    batch_size_solutions = solutions.shape[0]
+
+    if batch_size != batch_size_solutions:
+        raise ValueError("Batch sizes of logits_node and solutions must match.")
+
+    masked_logits_node = logits_node.clone()
+
+    # Extract the indices from the 3D solutions tensor
+    indices = solutions[:, 1:-2, 0].to(
+        torch.int64
+    )  # (batch_size, num_solutions, solution_length - 2)
+
+    # Flatten the indices and batch indices for advanced indexing
+    flat_indices = indices.view(
+        batch_size, -1
+    )  # (batch_size, num_solutions * (solution_length - 2))
+
+    # Create a batch index tensor for advanced indexing
+    batch_indices = (
+        torch.arange(batch_size, device=flat_indices.device)
+        .view(batch_size, 1)
+        .expand(batch_size, flat_indices.shape[1])
+    )
+
+    # Create a mask with True everywhere
+    mask = torch.ones(
+        (batch_size, seq_len), dtype=torch.bool, device=logits_node.device
+    )
+
+    # Use advanced indexing to set the masked positions to False
+    mask[batch_indices, flat_indices] = False
+
+    # Apply the mask to logits_node
+    masked_logits_node[mask] = torch.tensor(-float("inf"), device=logits_node.device)
+
+    return masked_logits_node
 
 
 class LEHDTrainer(Solver):
@@ -19,7 +67,7 @@ class LEHDTrainer(Solver):
         self.trainer_params = config["data"]["train"]
         self.testing_params = config["data"]["test"]
 
-        self.batch_backprop = False  # Set to False to avoid backpropagation after step (do it in the step function)
+        self.city_indices = None
 
         # Set random seed
         torch.manual_seed(22)
@@ -35,6 +83,13 @@ class LEHDTrainer(Solver):
         # Override to use custom batch sampler
         dataset, collate_fn = self.get_dataset(config)
 
+        if self.city_indices is None:
+            self.city_indices = dataset.city_indices
+        else:
+            assert torch.equal(
+                self.city_indices, dataset.city_indices
+            ), "City indices do not match"
+
         # Determine if this is train or test config
         is_train = config["mode"] == "train"
         params = self.trainer_params if is_train else self.testing_params
@@ -46,6 +101,7 @@ class LEHDTrainer(Solver):
             dataset_size,
             problem_size,
             params["batch_size"],
+            params["shuffle"],
         )
 
         # Wrap it with the infinite sampler
@@ -62,103 +118,240 @@ class LEHDTrainer(Solver):
         )
         return data_loader
 
+    def train(self):
+        self.manual_seed()
+        self.config_model()
+        self.config_dataloader()
+        self.config_optimizer()
+        self.config_lr_scheduler()
+        self.configure_log()
+        self.load_checkpoint()
+
+        self.time_estimator.reset(self.start_epoch)
+
+        self.model.encoder.prepare_embedding(self.city_indices)
+
+        for epoch in range(self.start_epoch, self.config["solver"]["max_epoch"] + 1):
+            logger.info(
+                f'====================  EPOCH {epoch:3d}/{self.config["solver"]["max_epoch"]:3d}  ===================='
+            )
+            # training epoch
+            self.train_epoch(epoch)
+
+            # update learning rate
+            self.scheduler.step()
+            lr = self.scheduler.get_last_lr()
+            self.summary_writer.add_scalar("train/lr", lr[0], epoch)
+
+            elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(
+                epoch, self.config["solver"]["max_epoch"]
+            )
+            logger.info(
+                "Elapsed: {}, Remaining: {}".format(elapsed_time_str, remain_time_str)
+            )
+            logger.info(" ")
+
+            # testing epoch
+            if epoch % self.config["solver"]["test_every_epoch"] == 0:
+                logger.info(
+                    f'-------------------  TESTING {epoch:3d}/{self.config["solver"]["max_epoch"]:3d}  -------------------'
+                )
+                self.test_epoch(epoch)
+
+            # checkpoint
+            if epoch % self.config["solver"]["save_every_epoch"] == 0:
+                self.save_checkpoint(epoch)
+                logger.info("Saved checkpoint to %s" % self.ckpt_dir)
+
+    def train_epoch(self, epoch):
+        self.model.train()
+
+        tick = time.time()
+        elapsed_time = dict()
+
+        train_tracker_epoch = AverageTracker()
+
+        for episode in range(1, len(self.train_loader) + 1):
+            train_tracker = AverageTracker()
+
+            # load data
+            batch = self.train_iter.__next__()
+            batch["iter_num"] = episode
+            batch["epoch"] = epoch
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
+
+            elapsed_time["time/data"] = torch.Tensor([time.time() - tick])
+
+            # forward and backward
+            output = self.train_step(batch)
+
+            # track the averaged tensors
+            elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
+            tick = time.time()
+            output.update(elapsed_time)
+            train_tracker.update(output)
+            train_tracker_epoch.update(output)
+
+            if (
+                episode % 50 == 0
+                and self.config["solver"]["empty_cache"]
+                and torch.cuda.is_available()
+            ):
+                torch.cuda.empty_cache()
+
+            if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
+                logger.info(
+                    "Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}".format(
+                        epoch,
+                        episode,
+                        len(self.train_loader),
+                        episode / len(self.train_loader) * 100,
+                        output["train/loss"],
+                        output["time/batch"].item() / 60,
+                    )
+                )
+
+            self.global_step += 1
+
+            if self.rank == 0:
+                log_data = train_tracker.average()
+                log_data["lr"] = self.optimizer.param_groups[0]["lr"]
+                wandb.log(log_data, step=self.global_step)
+
+        logger.info(" ")
+        logger.info("*** Summary ***")
+        logger.info(
+            "Avg. Loss: {:.2f} Avg. Time: {:.2f} min".format(
+                train_tracker_epoch.average()["train/loss"],
+                train_tracker_epoch.average()["time/batch"] / 60,
+            )
+        )
+
+    def test_epoch(self, epoch):
+        self.model.eval()
+        test_tracker = AverageTracker()
+
+        tick = time.time()  # Start time for batch timing
+        elapsed_time = dict()
+
+        for episode in range(1, len(self.test_loader) + 1):  # Simple loop without tqdm
+            # Load data
+            batch = self.test_iter.__next__()
+            batch["iter_num"] = episode
+            batch["epoch"] = epoch
+
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
+
+            elapsed_time["time/data"] = torch.Tensor([time.time() - tick])
+
+            # Forward pass using test_step
+            with torch.no_grad():
+                output = self.test_step(batch)
+
+            elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
+            tick = time.time()
+
+            # Update tracker with metrics and timing
+            output.update(elapsed_time)
+            test_tracker.update(output)
+
+            # Log per iteration if required
+            if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
+                logger.info(
+                    "Epoch {:3d}: Test {:3d}/{:3d} ({:5.1f}%) Gap: {:.4f} Time: {:.2f}".format(
+                        epoch,
+                        episode,
+                        len(self.test_loader),
+                        (episode) / len(self.test_loader) * 100,
+                        output["test/gap_percentage"],
+                        output["time/batch"].item() / 60,
+                    )
+                )
+
+        # Log final averaged metrics to wandb and console
+        # Logg averages
+        logger.info(" ")
+        logger.info("*** Summary ***")
+        logger.info(
+            "Avg. Opt. Score: {:.2f}, Avg. St. Score: {:.2f}".format(
+                test_tracker.average()["test/optimal_score"],
+                test_tracker.average()["test/student_score"],
+            )
+        )
+        logger.info(
+            "Avg. Gap: {:.2f}%, Avg. Time {:.2f} min".format(
+                test_tracker.average()["test/gap_percentage"],
+                test_tracker.average()["time/batch"] / 60,
+            )
+        )
+        logger.info(" ")
+
+        if self.rank == 0:
+            log_data = test_tracker.average()
+            log_data["epoch"] = epoch
+            wandb.log(log_data, step=self.global_step)
+
     def train_step(self, batch):
         # Extract data from batch
-        problems = batch["problems"]
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
 
-        # Initialize state tracking
-        batch_size = problems.size(0)
-        problem_size = problems.size(1) - 1  # Excluding depot
-
-        # Initialize selected node lists and flags
-        selected_node_list = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_teacher_flag = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_student_list = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_student_flag = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-
         loss_list = []
-        current_step = 0
-
         # Training loop for constructing solution
-        while current_step < problem_size:
-            if current_step == 0:
-                # First step - use teacher's first selection
-                selected_teacher = solutions[:, 0, 0]
-                selected_flag_teacher = solutions[:, 0, 1]
-                selected_student = selected_teacher.clone()
-                selected_flag_student = selected_flag_teacher.clone()
-                loss_mean = torch.tensor(0, device=self.device)
-            else:
-                # Use model to predict next node
-                (
-                    loss_node,
-                    selected_teacher,
-                    selected_student,
-                    selected_flag_teacher,
-                    selected_flag_student,
-                ) = self.model(
-                    problems,
-                    selected_node_list,
-                    solutions,
-                    current_step,
-                    capacities,
-                    mode="train",
-                )
+        while (
+            solutions.size(1) > 3
+        ):  # if solutions.size(1) == 3, only start, destination and depot left
+            logits_node, logits_flag = self.model(
+                solutions,
+                capacities,
+            )
 
-                loss_mean = loss_node
+            node_teacher = solutions[:, 1, 0].to(torch.int64)
+            flag_teacher = solutions[:, 1, -1].to(torch.int64)
 
-                # Backpropagate and update model
-                self.optimizer.zero_grad()
-                loss_mean.backward()
-                self.clip_grad_norm()
-                self.optimizer.step()
+            # calculate the cross entropy loss for the node selection
+            # TODO: Add int conversion somewhere deeper in the model/ loader
+            loss_node = F.cross_entropy(
+                logits_node, node_teacher
+            )  # TODO: Pretty certain but check if 1) need to add -1 and 2) if softmax before
+            loss_flag = F.cross_entropy(logits_flag, flag_teacher)
+
+            loss = 0.5 * loss_node + 0.5 * loss_flag
+            loss = loss
+
+            # Backpropagate and update model
+            self.model.zero_grad()
+            loss.backward()
+
+            self.clip_grad_norm()
+            self.optimizer.step()
 
             # Update capacity in problems tensor directly
             # 1. If flag = 1, the vehicle returns to depot and capacity is refilled
-            is_depot = selected_flag_teacher == 1
-            problems[is_depot, :, 3] = capacities[is_depot, None]
+            is_depot = flag_teacher == 1
+            solutions[is_depot, :, 3] = capacities[is_depot, None]
 
             # 2. Get demands of selected nodes using gather
-            gather_index = selected_teacher[:, None, None].expand(
-                (len(selected_teacher), 1, 4)
-            )
-            current_node_temp = problems.gather(index=gather_index, dim=1).squeeze(1)
-            selected_demands = current_node_temp[:, 2]
+            selected_demands = solutions[:, 1, 2]
 
             # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
-            smaller_ = problems[:, 0, 3] < selected_demands
-            selected_flag_teacher[smaller_] = 1
-            problems[smaller_, :, 3] = capacities[smaller_, None]
+            # TODO: Does this ever happen since we are working with the teacher's solution?
+            smaller_ = solutions[:, 0, 3] < selected_demands
+            solutions[smaller_, :, 3] = capacities[smaller_, None]
 
             # 4. Subtract demand from capacity
-            problems[:, :, 3] = problems[:, :, 3] - selected_demands[:, None]
+            solutions[:, :, 3] = solutions[:, :, 3] - selected_demands[:, None]
 
-            # Update tracking lists
-            selected_node_list = torch.cat(
-                (selected_node_list, selected_teacher.unsqueeze(1)), dim=1
-            )
-            selected_teacher_flag = torch.cat(
-                (selected_teacher_flag, selected_flag_teacher.unsqueeze(1)), dim=1
-            )
-            selected_student_list = torch.cat(
-                (selected_student_list, selected_student.unsqueeze(1)), dim=1
-            )
-            selected_student_flag = torch.cat(
-                (selected_student_flag, selected_flag_student.unsqueeze(1)), dim=1
-            )
+            # 5. Update problems tensor for next step
+            solutions = solutions[:, 1:, :]
 
-            current_step += 1
-            loss_list.append(loss_mean)
+            loss_list.append(loss)
 
         # Calculate final loss
         loss_mean = torch.stack(loss_list).mean()
@@ -168,121 +361,94 @@ class LEHDTrainer(Solver):
 
     def test_step(self, batch):
         # Extract data from batch
-        problems = batch["problems"]
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
 
-        # Initialize state tracking
-        batch_size = problems.size(0)
-        problem_size = problems.size(1) - 1  # Excluding depot
+        batch_size = solutions.size(0)
 
-        # Initialize selected node lists and flags
-        selected_node_list = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_teacher_flag = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_student_list = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
-        selected_student_flag = torch.zeros(
-            (batch_size, 0), dtype=torch.long, device=self.device
-        )
+        solutions_orig = solutions.clone()
 
-        # Track current capacity
-        current_capacity = capacities.clone()
-        current_step = 0
+        start_node = solutions[:, 0, :]
 
-        # Store original problem for calculating distances later
-        origin_problem = problems.clone().detach()
-
-        # First pass - get initial solution
-        while current_step < problem_size:
-            if current_step == 0:
-                # First step - use teacher's first selection
-                selected_teacher = solutions[:, 0, 0]
-                selected_flag_teacher = solutions[:, 0, 1]
-                selected_student = selected_teacher.clone()
-                selected_flag_student = selected_flag_teacher.clone()
-            else:
-                # Use model to predict next node
-                (
-                    _,
-                    selected_teacher,
-                    selected_student,
-                    selected_flag_teacher,
-                    selected_flag_student,
-                ) = self.model(
-                    problems,
-                    selected_node_list,
-                    solutions,
-                    current_step,
-                    capacities,
-                    mode="test",
-                )
-
-            # Update capacity based on selection
-            # Handle depot returns (capacity refill)
-            is_depot = selected_flag_student == 1
-            current_capacity[is_depot] = capacities[is_depot]
-
-            # Get demands of selected nodes
-            selected_demands = torch.gather(
-                problems[:, :, 2], 1, selected_student.unsqueeze(1)
-            ).squeeze(1)
-
-            # Check if capacity is less than demand, refill if needed
-            smaller_ = current_capacity < selected_demands
-            selected_flag_student[smaller_] = 1
-            current_capacity[smaller_] = capacities[smaller_]
-
-            # Subtract demand from capacity
-            current_capacity = current_capacity - selected_demands
-
-            # Update tracking lists
-            selected_node_list = torch.cat(
-                (selected_node_list, selected_student.unsqueeze(1)), dim=1
+        # initialize selected node student list with an index of solutions[:, -1, 0]
+        selected_student_list = start_node[:, 0].unsqueeze(1)
+        selected_student_flag = solutions[:, 0, -1].to(torch.int64).unsqueeze(1)
+        # Training loop for constructing solution
+        while (
+            solutions.size(1) > 3
+        ):  # if solutions.size(1) == 3, only start, destination and depot left
+            logits_node, logits_flag = self.model(
+                solutions,
+                capacities,
             )
-            selected_teacher_flag = torch.cat(
-                (selected_teacher_flag, selected_flag_teacher.unsqueeze(1)), dim=1
-            )
+
+            # mask all nodes except the unvisisetd nodes (solutions 1 to -2)
+            masked_logits_node = mask_logits(logits_node, solutions)
+
+            node_student = masked_logits_node.argmax(dim=1)
+            flag_student = logits_flag.argmax(dim=1)
+
+            # Update capacity in problems tensor directly
+            # 1. If flag = 1, the vehicle returns to depot and capacity is refilled
+            is_depot = flag_student == 1
+            solutions[is_depot, :, 3] = capacities[is_depot, None]
+
+            # 2. Get demands of selected nodes using gather
+            selected_demands = solutions[:, 1, 2]
+
+            # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
+            smaller_ = solutions[:, 0, 3] < selected_demands
+            solutions[smaller_, :, 3] = capacities[smaller_, None]
+            flag_student[smaller_] = 1
+
+            # 4. Subtract demand from capacity
+            solutions[:, :, 3] = solutions[:, :, 3] - selected_demands[:, None]
+
+            # 5. Update problems tensor for next step
+            # TODO: Continue here, find the indixes where solutions[:,i, 0] == node_student
+            mask = solutions[:, :, 0] == node_student.unsqueeze(1)
+
+            start_node = solutions[mask]
+            solutions = solutions[~mask]
+
+            # rebatch the start_node and solutions
+            start_node = start_node.view(batch_size, -1, start_node.size(1))
+            solutions = solutions.view(batch_size, -1, solutions.size(1))
+
+            # switch the solution and move the student node indexes to the first entry
+            solutions = torch.cat((start_node, solutions[:, 1:]), dim=1)
+
             selected_student_list = torch.cat(
-                (selected_student_list, selected_student.unsqueeze(1)), dim=1
+                (selected_student_list, node_student.unsqueeze(1)), dim=1
             )
             selected_student_flag = torch.cat(
-                (selected_student_flag, selected_flag_student.unsqueeze(1)), dim=1
+                (selected_student_flag, flag_student.unsqueeze(1)), dim=1
             )
 
-            current_step += 1
-
-        # Combine node and flag information for final solution
-        best_select_node_list = torch.cat(
-            (selected_student_list.unsqueeze(2), selected_student_flag.unsqueeze(2)),
-            dim=2,
+        # Add target location to the solution
+        selected_student_list = torch.cat(
+            (selected_student_list, solutions[:, -2, 0].unsqueeze(1)), dim=1
+        )
+        selected_student_flag = torch.cat(
+            (selected_student_flag, solutions[:, -2, -1].unsqueeze(1)), dim=1
         )
 
         # Calculate optimal and student scores
-        optimal_length = self._get_travel_distance(
-            origin_problem,
-            torch.cat(
-                (
-                    solutions[:, :problem_size, 0].unsqueeze(2),
-                    solutions[:, :problem_size, 1].unsqueeze(2),
-                ),
-                dim=2,
-            ),
+        optimal_length = self.get_travel_distance(
+            solutions_orig[:, :-1, 0]
+            .clone()
+            .to(torch.int64),  # exclude depot from the solution vector
+            solutions_orig[:, :-1, 4]
+            .clone()
+            .to(torch.int64),  # exclude depot from the solution vector
         )
-        current_best_length = self._get_travel_distance(
-            origin_problem, best_select_node_list
+        current_best_length = self.get_travel_distance(
+            selected_student_list.clone().to(torch.int64),
+            selected_student_flag.clone().to(torch.int64),
         )
 
         # Calculate gap as percentage
-        gap = (
-            (current_best_length.mean() - optimal_length.mean())
-            / optimal_length.mean()
-            * 100
-        )
+        gap = 100 * ((current_best_length - optimal_length) / optimal_length).mean()
 
         # Return output dictionary for tracker
         return {
@@ -291,54 +457,36 @@ class LEHDTrainer(Solver):
             "test/gap_percentage": gap,
         }
 
-    def _get_travel_distance(self, problems_, solution_):
-        """
-        Calculate the travel distance for a given solution.
-        """
-        problems = problems_[:, :, 0].clone()
-        order_node = solution_[:, :, 0].clone()
-        order_flag = solution_[:, :, 1].clone()
-        travel_distances = self.cal_length(problems, order_node, order_flag)
-
-        return travel_distances
-
-    def cal_length(self, problems, order_node, order_flag):
-        """
-        Calculate the length of routes based on the solution using geodesic distances.
-        """
-        batch_size = problems.size(0)
-
-        # Initialize total distance
-        total_distance = torch.zeros(batch_size, device=self.device)
+    def get_travel_distance(self, order_node, order_flag):
+        # order_node: [B,V]
+        # order_flag: [B,V]
+        order_node_ = order_node.clone()
+        order_flag_ = order_flag.clone()
 
         # Get the dataset to access the geodesic matrix
         dataset = self.test_loader.dataset
-        geodesic_matrix = dataset.geodesic_matrix
+        geodesic_matrix = dataset.geodesic_matrix.to(self.device)
 
-        # Initialize current position as depot (index 0)
-        current_position_idx = torch.zeros(
-            batch_size, dtype=torch.long, device=self.device
-        )
+        index_small = torch.le(order_flag_, 0.5)
+        index_bigger = torch.gt(order_flag_, 0.5)
 
-        # Iterate through the solution
-        for i in range(order_node.size(1)):
-            # Get index of the next node
-            next_node_idx = order_node[:, i]
+        order_flag_[index_small] = order_node_[index_small]
+        order_flag_[index_bigger] = 0
 
-            # Calculate geodesic distance between current and next position
-            for b in range(batch_size):
-                # Get indices for the geodesic matrix lookup
-                curr_idx = problems[b, current_position_idx[b]].long()
-                next_idx = problems[b, next_node_idx[b]].long()
+        roll_node = order_node_.roll(dims=1, shifts=1)
 
-                # Add geodesic distance directly
-                total_distance[b] += geodesic_matrix[curr_idx, next_idx]
+        order_loc = order_node_
+        roll_loc = roll_node
+        flag_loc = order_flag_
 
-            # Update current position
-            current_position_idx = next_node_idx.clone()
+        order_lengths = geodesic_matrix[order_loc, flag_loc]
 
-            # If returning to depot, update current position to depot
-            is_depot = order_flag[:, i] == 1
-            current_position_idx[is_depot] = 0
+        order_flag_[:, 0] = 0
 
-        return total_distance
+        flag_loc = order_flag_
+
+        roll_lengths = geodesic_matrix[roll_loc, flag_loc]
+
+        length = order_lengths.sum(dim=1) + roll_lengths.sum(dim=1)
+
+        return length

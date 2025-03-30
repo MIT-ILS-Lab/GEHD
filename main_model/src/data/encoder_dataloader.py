@@ -16,7 +16,6 @@ def read_file(filename):
 
 
 class Dataset(torch.utils.data.Dataset):
-
     def __init__(
         self,
         root,
@@ -25,6 +24,7 @@ class Dataset(torch.utils.data.Dataset):
         read_file=read_file,
         in_memory=False,
         take: int = -1,
+        file_rep: int = 1,  # How often to repeat the filelist
     ):
         super(Dataset, self).__init__()
         self.root = root
@@ -33,6 +33,7 @@ class Dataset(torch.utils.data.Dataset):
         self.in_memory = in_memory
         self.read_file = read_file
         self.take = take
+        self.file_rep = file_rep
 
         self.filenames, self.labels = self.load_filenames()
         if self.in_memory:
@@ -43,23 +44,30 @@ class Dataset(torch.utils.data.Dataset):
             ]
 
     def __len__(self):
-        return len(self.filenames)
+        # Scale the dataset length by the factor
+        return len(self.filenames) * self.file_rep
 
     def __getitem__(self, idx):
+        # Use modulo to cycle through the dataset when idx exceeds original length
+        actual_idx = idx % len(self.filenames)
+
         sample = (
-            self.samples[idx]
+            self.samples[actual_idx]
             if self.in_memory
-            else self.read_file(os.path.join(self.root, self.filenames[idx]))
-        )  # noqa
-        output = self.transform(sample, idx)  # data augmentation
-        output["label"] = self.labels[idx]
-        output["filename"] = self.filenames[idx]
+            else self.read_file(os.path.join(self.root, self.filenames[actual_idx]))
+        )
+
+        output = self.transform(sample, actual_idx)  # Apply data augmentation
+        output["label"] = self.labels[actual_idx]
+        output["filename"] = self.filenames[actual_idx]
+
         return output
 
     def load_filenames(self):
         filenames, labels = [], []
         with open(self.filelist) as fid:
             lines = fid.readlines()
+
         for line in lines:
             tokens = line.split()
             filename = tokens[0]
@@ -68,6 +76,7 @@ class Dataset(torch.utils.data.Dataset):
             labels.append(int(label))
 
         num = len(filenames)
+
         if self.take > num or self.take < 1:
             self.take = num
 
@@ -248,5 +257,6 @@ def get_dataset(config):
         transform,
         read_file=np.load,
         take=config["take"],
+        file_rep=config["file_rep"],
     )
     return dataset, collate_batch

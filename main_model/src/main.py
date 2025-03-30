@@ -50,9 +50,18 @@ if __name__ == "__main__":
 
     # Pretty-print the config using YAML formatting
     logging.info(
-        f"Loaded configuration from {config}:\n{yaml.dump(config, default_flow_style=False, sort_keys=False)}"
+        f"Loaded configuration from {path}:\n{yaml.dump(config, default_flow_style=False, sort_keys=False)}"
     )
 
     solver = model(config)
 
     solver.run()
+
+
+# TODO:
+# 1. Check if capacities get passed correctly / added to the embeddings to the model
+# 2. What to do with the memory for large instances (try different options)
+# 3. Model has difficulties predicting flag 1, either think of a better decoder model, go away from aligned representation or something else...
+# 4. Remove hard-coded stuff, mesh_size, memory and improve readability of the decoder architecture
+# 5. Which masking is best, one where you mask all infeasible nodes or allow infeasible and do extra epot step
+# 6. Add second dataloader with only one iteration for specifically every element in the batch has flag 1 for more training data on these cases

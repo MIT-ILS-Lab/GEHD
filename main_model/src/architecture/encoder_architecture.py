@@ -24,6 +24,8 @@ class GraphUNet(nn.Module):
         # The number of blocks in each stage of the encoder and decoder
         self.encoder_blocks = [2, 3, 3, 3, 2]
         self.decoder_blocks = [2, 3, 3, 3, 2]
+        # self.encoder_blocks = [3, 4, 4, 4, 3]
+        # self.decoder_blocks = [3, 4, 4, 4, 3]
         self.encoder_stages = len(self.encoder_blocks)
         self.decoder_stages = len(self.decoder_blocks)
 

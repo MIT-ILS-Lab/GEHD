@@ -8,8 +8,6 @@
 import time
 import torch
 import torch.distributed
-from datetime import datetime
-from tqdm import tqdm
 from typing import Dict
 import logging
 
@@ -52,61 +50,3 @@ class AverageTracker:
             torch.distributed.all_gather(tensors_gather, tensor, async_op=False)
             tensors = torch.stack(tensors_gather, dim=0)
             self.value[key] = torch.mean(tensors)
-
-    def log(
-        self,
-        epoch,
-        summary_writer=None,
-        log_file=None,
-        msg_tag="->",
-        notes="",
-        print_time=True,
-        print_memory=False,
-        pbar=None,
-    ):
-        if not self.value:
-            return  # empty, return
-
-        avg = self.average()
-
-        if pbar:
-            pbar.set_postfix(ordered_dict=avg)
-            return
-
-        msg = "Epoch: %d" % epoch
-        for key, val in avg.items():
-            msg += ", %s: %.3f" % (key, val)
-            if summary_writer is not None:
-                summary_writer.add_scalar(key, val, epoch)
-
-        # if the log_file is provided, save the log
-        if log_file is not None:
-            with open(log_file, "a") as fid:
-                fid.write(msg + "\n")
-
-        # memory
-        memory = ""
-        if print_memory and torch.cuda.is_available():
-            size = torch.cuda.memory_reserved()
-            # size = torch.cuda.memory_allocated()
-            memory = ", memory: {:.3f}GB".format(size / 2**30)
-
-        # time
-        time_str = ""
-        if print_time:
-            curr_time = ", time: " + datetime.now().strftime("%Y/%m/%d %H:%M:%S")
-            duration = ", duration: {:.2f}s".format(time.time() - self.start_time)
-            time_str = curr_time + duration
-
-        # other notes
-        if notes:
-            notes = ", " + notes
-
-        # concatenate all messages
-        msg += memory + time_str + notes
-
-        # split the msg for better display
-        chunks = [msg[i : i + self.max_len] for i in range(0, len(msg), self.max_len)]
-        msg = (msg_tag + " ") + ("\n" + len(msg_tag) * " " + " ").join(chunks)
-
-        logging.info(msg)

@@ -4,6 +4,8 @@ import shutil
 import sys
 import numpy as np
 import trimesh
+import logging
+import time
 
 from pyvrp import Solution
 
@@ -128,3 +130,31 @@ def read_mesh(path, to_tensor=True):
         "face_normals": face_normals,
         "face_areas": face_areas,
     }
+
+class TimeEstimator:
+    def __init__(self):
+        self.start_time = time.time()
+        self.count_zero = 0
+
+    def reset(self, count=1):
+        self.start_time = time.time()
+        self.count_zero = count-1
+
+    def get_est(self, count, total):
+        curr_time = time.time()
+        elapsed_time = curr_time - self.start_time
+        remain = total-count
+        remain_time = elapsed_time * remain / (count - self.count_zero)
+
+        elapsed_time /= 3600.0
+        remain_time /= 3600.0
+
+        return elapsed_time, remain_time
+
+    def get_est_string(self, count, total):
+        elapsed_time, remain_time = self.get_est(count, total)
+
+        elapsed_time_str = "{:.2f} hours".format(elapsed_time) if elapsed_time > 1.0 else "{:.2f} min".format(elapsed_time*60)
+        remain_time_str = "{:.2f} hours".format(remain_time) if remain_time > 1.0 else "{:.2f} min".format(remain_time*60)
+
+        return elapsed_time_str, remain_time_str
