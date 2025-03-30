@@ -303,27 +303,26 @@ class LEHDTrainer(Solver):
         capacities = batch["capacities"].float()
 
         loss_list = []
+
+        city_length = len(self.city_indices)
+
         # Training loop for constructing solution
         while (
             solutions.size(1) > 3
         ):  # if solutions.size(1) == 3, only start, destination and depot left
-            logits_node, logits_flag = self.model(
+            logits_node = self.model(
                 solutions,
                 capacities,
             )
 
+            # TODO: Add int conversion somewhere deeper in the model/ loader
             node_teacher = solutions[:, 1, 0].to(torch.int64)
             flag_teacher = solutions[:, 1, -1].to(torch.int64)
 
-            # calculate the cross entropy loss for the node selection
-            # TODO: Add int conversion somewhere deeper in the model/ loader
-            loss_node = F.cross_entropy(
-                logits_node, node_teacher
-            )  # TODO: Pretty certain but check if 1) need to add -1 and 2) if softmax before
-            loss_flag = F.cross_entropy(logits_flag, flag_teacher)
+            node_teacher = node_teacher + city_length * flag_teacher
 
-            loss = 0.5 * loss_node + 0.5 * loss_flag
-            loss = loss
+            # calculate the cross entropy loss for the node selection
+            loss = F.cross_entropy(logits_node, node_teacher)
 
             # Backpropagate and update model
             self.model.zero_grad()
@@ -370,6 +369,8 @@ class LEHDTrainer(Solver):
 
         start_node = solutions[:, 0, :]
 
+        city_length = len(self.city_indices)
+
         # initialize selected node student list with an index of solutions[:, -1, 0]
         selected_student_list = start_node[:, 0].unsqueeze(1)
         selected_student_flag = solutions[:, 0, -1].to(torch.int64).unsqueeze(1)
@@ -377,16 +378,23 @@ class LEHDTrainer(Solver):
         while (
             solutions.size(1) > 3
         ):  # if solutions.size(1) == 3, only start, destination and depot left
-            logits_node, logits_flag = self.model(
+            logits_node = self.model(
                 solutions,
                 capacities,
             )
 
             # mask all nodes except the unvisisetd nodes (solutions 1 to -2)
-            masked_logits_node = mask_logits(logits_node, solutions)
+            masked_logits_node_1 = mask_logits(logits_node[:, :city_length], solutions)
+            masked_logits_node_2 = mask_logits(logits_node[:, city_length:], solutions)
+
+            masked_logits_node = torch.cat(
+                (masked_logits_node_1, masked_logits_node_2), dim=1
+            )
 
             node_student = masked_logits_node.argmax(dim=1)
-            flag_student = logits_flag.argmax(dim=1)
+
+            flag_student = (node_student >= city_length).to(node_student.dtype)
+            node_student = node_student - city_length * flag_student
 
             # Update capacity in problems tensor directly
             # 1. If flag = 1, the vehicle returns to depot and capacity is refilled
