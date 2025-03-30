@@ -26,6 +26,7 @@ class LEHD(nn.Module):
     ):
         # solution's shape : [B, V]
         # TODO: This only works if all capacities are the same I guess
+        self.capacity = capacities.ravel()[0].item()
         memory = self.encoder.gegnn.embds  # TODO: Quick fix
 
         remaining_capacity = solutions[:, 0, 3]
@@ -50,9 +51,9 @@ class LEHD(nn.Module):
         encoder_out[:, 0, -1] = 0.0
 
         # TODO: Check this and how to handle memory
-        logits = self.decoder(encoder_out, memory)
+        logits_node, logits_flag = self.decoder(encoder_out, memory)
 
-        return logits
+        return logits_node, logits_flag
 
 
 class DecoderCityHelp(nn.Module):
@@ -81,7 +82,8 @@ class DecoderCityHelp(nn.Module):
         self.decoder = nn.TransformerDecoder(self.self_attention, num_layers=num_layers)
 
         # Fully connected layers for outputs
-        self.output_layer = nn.Linear(input_dim, output_dim * 2)
+        self.output_layer = nn.Linear(input_dim, output_dim)
+        self.decision_layer = nn.Linear(input_dim, decision_dim)
 
     def forward(self, x, memory):
         """
@@ -104,8 +106,9 @@ class DecoderCityHelp(nn.Module):
 
         # TODO: This the best way to do this?
         output_tensor = self.output_layer(pooled)  # (batch_size, city_size)
+        decision_tensor = self.decision_layer(pooled)  # (batch_size, 2)
 
-        return output_tensor
+        return output_tensor, decision_tensor
 
 
 class DecoderCity(nn.Module):
@@ -149,9 +152,9 @@ class DecoderCity(nn.Module):
 
         # TODO: think about having depot, source and destination in the memory (or at least the depot)
         decoder_input = torch.cat((source, candidates, destination, depot), dim=1)
-        logits_student = self.decoder(decoder_input, memory)
+        logits_student, logits_flag = self.decoder(decoder_input, memory)
 
-        return logits_student
+        return logits_student, logits_flag
 
 
 class GeGnn(nn.Module):

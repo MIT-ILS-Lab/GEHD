@@ -180,8 +180,8 @@ def txt_to_h5(txt_filename, h5_filename, num_problems=100):
 if __name__ == "__main__":
     # Convert from H5 to TXT
     h5_to_txt(
-        "main_model/disk/problems/mesh_cvrp_data_train_new.h5",
-        "vrp_train_data_new_3d.txt",
+        "main_model/disk/problems/city_20/problems_20_train.h5",
+        "vrp_train_data_20_20_3d.txt",
     )
 
     # Convert from TXT to H5 v

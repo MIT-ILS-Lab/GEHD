@@ -43,7 +43,7 @@ data:
     # data loading
     batch_size: 16
     num_workers: 4
-    episodes: 1000    # -1 means all
+    episodes: 100    # -1 means all
 
     shuffle: true
 

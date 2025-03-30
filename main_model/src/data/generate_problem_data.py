@@ -225,7 +225,7 @@ def get_solution(mesh_city: dict, problem: dict, max_runtime: int) -> dict:
 
     depot = m.add_depot(x=0, y=0)
     clients = [
-        m.add_client(x=idx, y=idx, delivery=demands[idx])
+        m.add_client(x=1, y=1, delivery=demands[idx], name=f"client_{idx}")
         for idx in range(1, len(problem_indices))
     ]
 
@@ -410,12 +410,12 @@ def access_mesh_cvrp_data(filename: str, problem_index: int = 0) -> dict:
 if __name__ == "__main__":
     # TODO: Sync this mesh path with the actual path in the architecture/ config file
     mesh_path = "main_model/disk/meshes/sphere.obj"
-    filename_train = "main_model/disk/problems/mesh_cvrp_data_train_100.h5"
-    filename_test = "main_model/disk/problems/mesh_cvrp_data_test_100.h5"
-    num_problems_train = 5000
+    filename_train = "main_model/disk/problems/mesh_cvrp_data_train_20.h5"
+    filename_test = "main_model/disk/problems/mesh_cvrp_data_test_20.h5"
+    num_problems_train = 1000
     num_problems_test = 100
-    problem_size = 100
-    num_customers = 100
+    problem_size = 5
+    num_customers = 20
 
     # Generate the mesh city once
     logging.info(f"Generating mesh city with {num_customers} customers...")
