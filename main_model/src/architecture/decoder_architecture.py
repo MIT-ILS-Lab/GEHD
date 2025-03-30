@@ -33,16 +33,22 @@ class LEHD(nn.Module):
 
         encoder_out = self.encoder(solutions)
 
+        normalized_demand = 2 * (
+            (solutions[:, :, 2] - remaining_capacity[:, None]) / capacities[:, None]
+        )
+
         encoder_out = torch.cat(
             (
                 encoder_out,
-                solutions[:, :, 2].unsqueeze(-1) / self.capacity,
+                normalized_demand.unsqueeze(
+                    -1
+                ),  # TODO: This a good idea to divide by remaining capacity? Can sometimes be 0...
             ),
             dim=2,
         )
 
         # add remaining capacity for the source node TODO: Does it make sense to just leave this as is without this step?
-        encoder_out[:, 0, -1] = remaining_capacity / self.capacity
+        encoder_out[:, 0, -1] = 0.0
 
         # TODO: Check this and how to handle memory
         logits_node, logits_flag = self.decoder(encoder_out, memory)
@@ -215,6 +221,6 @@ class Encoder(nn.Module):
     def prepare_embedding(self, city_indexes):
         self.gegnn.embds = self.gegnn.embds[city_indexes]
 
-    def forward(self, problems):
-        out = self.gegnn(problems[:, :, 0].to(torch.int64))
+    def forward(self, solutions):
+        out = self.gegnn(solutions[:, :, 0].to(torch.int64))
         return out
