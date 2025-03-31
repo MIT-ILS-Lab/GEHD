@@ -297,27 +297,11 @@ class LEHDTrainer(Solver):
                 capacities,
             )
 
-            node_teacher = solutions[:, 1, 0].to(torch.int64)
+            node_teacher = torch.zeros(solutions.size(0), dtype=torch.int64)
             flag_teacher = solutions[:, 1, -1].to(torch.int64)
 
-            # For pointer mechanism, logits_node will be scores over candidate nodes
-            # We need to map the teacher node to its position in the candidates list
-            candidate_indices = solutions[:, 1:-2, 0].to(torch.int64)
-            batch_size = solutions.size(0)
-            target_indices = torch.zeros(
-                batch_size, dtype=torch.long, device=solutions.device
-            )
-
-            # Find the position of each teacher node in the candidates
-            for i in range(batch_size):
-                target_pos = (candidate_indices[i] == node_teacher[i]).nonzero(
-                    as_tuple=True
-                )[0]
-                if target_pos.size(0) > 0:
-                    target_indices[i] = target_pos[0]
-
             # Calculate loss with the position indices
-            loss_node = F.cross_entropy(logits_node, target_indices)
+            loss_node = F.cross_entropy(logits_node, node_teacher)
             loss_flag = F.cross_entropy(logits_flag, flag_teacher)
 
             loss = loss_node + loss_flag
@@ -379,26 +363,21 @@ class LEHDTrainer(Solver):
                 capacities,
             )
 
-            # mask all nodes except the unvisisetd nodes (solutions 1 to -2)
-            masked_logits_node = mask_logits(logits_node, solutions)
-
             # Select the highest scoring candidate
-            node_indices = masked_logits_node.argmax(dim=1)
+            node_indices = logits_node.argmax(dim=1)
             flag_student = logits_flag.argmax(dim=1)
 
-            # Map the selected indices back to actual node indices
-            candidate_indices = solutions[:, 1:-2, 0].to(torch.int64)
-            node_student = torch.gather(
-                candidate_indices, 1, node_indices.unsqueeze(1)
-            ).squeeze(1)
-
             # Update capacity in problems tensor directly
+            solutions = solutions[:, 1:, :]
+
             # 1. If flag = 1, the vehicle returns to depot and capacity is refilled
             is_depot = flag_student == 1
             solutions[is_depot, :, 3] = capacities[is_depot, None]
 
             # 2. Get demands of selected nodes using gather
-            selected_demands = solutions[:, 1, 2]
+            selected_demands = torch.gather(
+                solutions[:, :, 2], dim=1, index=node_indices.unsqueeze(1)
+            ).squeeze(1)
 
             # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
             smaller_ = solutions[:, 0, 3] < selected_demands
@@ -409,21 +388,35 @@ class LEHDTrainer(Solver):
             solutions[:, :, 3] = solutions[:, :, 3] - selected_demands[:, None]
 
             # 5. Update problems tensor for next step
-            # TODO: Continue here, find the indixes where solutions[:,i, 0] == node_student
-            mask = solutions[:, :, 0] == node_student.unsqueeze(1)
+            batch_size, num_rows, num_columns = solutions.shape
 
-            start_node = solutions[mask]
-            solutions = solutions[~mask]
+            # Create a range of row indices for each batch
+            row_indices = (
+                torch.arange(num_rows, device=solutions.device)
+                .unsqueeze(0)
+                .expand(batch_size, -1)
+            )
 
-            # rebatch the start_node and solutions
-            start_node = start_node.view(batch_size, -1, start_node.size(1))
-            solutions = solutions.view(batch_size, -1, solutions.size(1))
+            # Create a mask for the rows that are not in node_indices
+            mask = row_indices != node_indices.unsqueeze(1)
 
-            # switch the solution and move the student node indexes to the first entry
-            solutions = torch.cat((start_node, solutions[:, 1:]), dim=1)
+            # Gather the rows corresponding to node_indices
+            source_rows = torch.gather(
+                solutions,
+                dim=1,
+                index=node_indices.unsqueeze(1).unsqueeze(2).expand(-1, 1, num_columns),
+            )
+
+            # Gather the remaining rows
+            remaining_rows = solutions[mask].view(batch_size, -1, num_columns)
+
+            # Concatenate the rows, with the selected rows at the front
+            solutions = torch.cat((source_rows, remaining_rows), dim=1)
+
+            node_student = source_rows[:, :, 0]
 
             selected_student_list = torch.cat(
-                (selected_student_list, node_student.unsqueeze(1)), dim=1
+                (selected_student_list, node_student), dim=1
             )
             selected_student_flag = torch.cat(
                 (selected_student_flag, flag_student.unsqueeze(1)), dim=1
