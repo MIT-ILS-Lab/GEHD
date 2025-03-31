@@ -43,7 +43,7 @@ data:
     # data loading
     batch_size: 16
     num_workers: 4
-    episodes: 100    # -1 means all
+    episodes: 1000    # -1 means all
 
     shuffle: true
 
@@ -75,7 +75,6 @@ data:
 
 model:
   embedding_dim: 128
-  sqrt_embedding_dim: 11.313708498984761
   decoder_layer_num: 6
   city_size: 21
   head_num: 8

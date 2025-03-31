@@ -20,43 +20,28 @@ logger = logging.getLogger(__name__)
 
 
 def mask_logits(logits_node, solutions):
-    batch_size, seq_len = logits_node.shape
-    batch_size_solutions = solutions.shape[0]
-
-    if batch_size != batch_size_solutions:
-        raise ValueError("Batch sizes of logits_node and solutions must match.")
-
-    masked_logits_node = logits_node.clone()
-
-    # Extract the indices from the 3D solutions tensor
-    indices = solutions[:, 1:-2, 0].to(
-        torch.int64
-    )  # (batch_size, num_solutions, solution_length - 2)
-
-    # Flatten the indices and batch indices for advanced indexing
-    flat_indices = indices.view(
-        batch_size, -1
-    )  # (batch_size, num_solutions * (solution_length - 2))
-
-    # Create a batch index tensor for advanced indexing
-    batch_indices = (
-        torch.arange(batch_size, device=flat_indices.device)
-        .view(batch_size, 1)
-        .expand(batch_size, flat_indices.shape[1])
-    )
+    batch_size, num_candidates = logits_node.shape
 
     # Create a mask with True everywhere
     mask = torch.ones(
-        (batch_size, seq_len), dtype=torch.bool, device=logits_node.device
+        (batch_size, num_candidates), dtype=torch.bool, device=logits_node.device
     )
 
-    # Use advanced indexing to set the masked positions to False
-    mask[batch_indices, flat_indices] = False
+    # Get indices of nodes that have already been visited
+    visited_nodes = solutions[:, 0, 0].unsqueeze(1)  # Current node
+
+    # Check which candidates match visited nodes
+    candidates = solutions[:, 1:-2, 0]
+    for i in range(batch_size):
+        for j in range(num_candidates):
+            if candidates[i, j] in visited_nodes[i]:
+                mask[i, j] = False
 
     # Apply the mask to logits_node
-    masked_logits_node[mask] = torch.tensor(-float("inf"), device=logits_node.device)
+    masked_logits = logits_node.clone()
+    masked_logits[~mask] = torch.tensor(-float("inf"), device=logits_node.device)
 
-    return masked_logits_node
+    return masked_logits
 
 
 class LEHDTrainer(Solver):
@@ -315,15 +300,27 @@ class LEHDTrainer(Solver):
             node_teacher = solutions[:, 1, 0].to(torch.int64)
             flag_teacher = solutions[:, 1, -1].to(torch.int64)
 
-            # calculate the cross entropy loss for the node selection
-            # TODO: Add int conversion somewhere deeper in the model/ loader
-            loss_node = F.cross_entropy(
-                logits_node, node_teacher
-            )  # TODO: Pretty certain but check if 1) need to add -1 and 2) if softmax before
+            # For pointer mechanism, logits_node will be scores over candidate nodes
+            # We need to map the teacher node to its position in the candidates list
+            candidate_indices = solutions[:, 1:-2, 0].to(torch.int64)
+            batch_size = solutions.size(0)
+            target_indices = torch.zeros(
+                batch_size, dtype=torch.long, device=solutions.device
+            )
+
+            # Find the position of each teacher node in the candidates
+            for i in range(batch_size):
+                target_pos = (candidate_indices[i] == node_teacher[i]).nonzero(
+                    as_tuple=True
+                )[0]
+                if target_pos.size(0) > 0:
+                    target_indices[i] = target_pos[0]
+
+            # Calculate loss with the position indices
+            loss_node = F.cross_entropy(logits_node, target_indices)
             loss_flag = F.cross_entropy(logits_flag, flag_teacher)
 
-            loss = 0.5 * loss_node + 0.5 * loss_flag
-            loss = loss
+            loss = loss_node + loss_flag
 
             # Backpropagate and update model
             self.model.zero_grad()
@@ -385,8 +382,15 @@ class LEHDTrainer(Solver):
             # mask all nodes except the unvisisetd nodes (solutions 1 to -2)
             masked_logits_node = mask_logits(logits_node, solutions)
 
-            node_student = masked_logits_node.argmax(dim=1)
+            # Select the highest scoring candidate
+            node_indices = masked_logits_node.argmax(dim=1)
             flag_student = logits_flag.argmax(dim=1)
+
+            # Map the selected indices back to actual node indices
+            candidate_indices = solutions[:, 1:-2, 0].to(torch.int64)
+            node_student = torch.gather(
+                candidate_indices, 1, node_indices.unsqueeze(1)
+            ).squeeze(1)
 
             # Update capacity in problems tensor directly
             # 1. If flag = 1, the vehicle returns to depot and capacity is refilled

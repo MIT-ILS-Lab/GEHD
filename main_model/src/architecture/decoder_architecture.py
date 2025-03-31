@@ -13,10 +13,16 @@ class LEHD(nn.Module):
         self.model_params = model_params
 
         self.encoder = Encoder(**model_params)
-        self.decoder = DecoderCity(**model_params)
+
+        self.decoder = PointerDecoder(
+            input_dim=model_params["pretrained_encoder"]["out_channels"] + 1,
+            embedding_dim=model_params["embedding_dim"],
+            hidden_dim=model_params["hidden_dim"],
+            num_heads=model_params["head_num"],
+            num_layers=model_params["decoder_layer_num"],
+        )
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         self.encoded_nodes = None
 
     def forward(
@@ -24,137 +30,121 @@ class LEHD(nn.Module):
         solutions,
         capacities=None,
     ):
-        # solution's shape : [B, V]
-        # TODO: This only works if all capacities are the same I guess
-        self.capacity = capacities.ravel()[0].item()
-        memory = self.encoder.gegnn.embds  # TODO: Quick fix
-
         remaining_capacity = solutions[:, 0, 3]
-
         encoder_out = self.encoder(solutions)
 
         normalized_demand = 2 * (
             (solutions[:, :, 2] - remaining_capacity[:, None]) / capacities[:, None]
         )
 
-        encoder_out = torch.cat(
-            (
-                encoder_out,
-                normalized_demand.unsqueeze(
-                    -1
-                ),  # TODO: This a good idea to divide by remaining capacity? Can sometimes be 0...
-            ),
-            dim=2,
-        )
+        encoder_out = torch.cat((encoder_out, normalized_demand.unsqueeze(-1)), dim=2)
 
-        # add remaining capacity for the source node TODO: Does it make sense to just leave this as is without this step?
+        # Set source node capacity to 0
         encoder_out[:, 0, -1] = 0.0
 
-        # TODO: Check this and how to handle memory
-        logits_node, logits_flag = self.decoder(encoder_out, memory)
+        # Forward through decoder
+        logits_node, logits_flag = self.decoder(encoder_out)
 
         return logits_node, logits_flag
 
 
-class DecoderCityHelp(nn.Module):
-    def __init__(
-        self,
-        input_dim,
-        hidden_dim,
-        num_heads,
-        num_layers,
-        output_dim=10000,
-        decision_dim=2,
-    ):
-        super(DecoderCityHelp, self).__init__()
+class NodeEmbedder(nn.Module):
+    """Separate module for embedding different node types"""
 
-        # Linear projection layer to map input to correct dimension
-        self.input_projection = nn.Linear(input_dim, input_dim)
+    def __init__(self, input_dim, embedding_dim):
+        super(NodeEmbedder, self).__init__()
+        self.embedd_source = nn.Linear(input_dim, embedding_dim, bias=True)
+        self.embedding_destination = nn.Linear(input_dim, embedding_dim, bias=True)
+        self.embedd_depot = nn.Linear(input_dim, embedding_dim, bias=True)
+        self.embedding_candidates = nn.Linear(input_dim, embedding_dim, bias=True)
 
-        # Transformer Decoder Layers (self-attention-based)
-        self.self_attention = nn.TransformerDecoderLayer(
-            d_model=input_dim,
-            nhead=num_heads,
-            dim_feedforward=hidden_dim,
-            batch_first=True,
+    def forward(self, solutions):
+        # Extract different node types
+        source = solutions[:, [0], :]
+        candidates = solutions[:, 1:-2, :]
+        destination = solutions[:, [-2], :]
+        depot = solutions[:, [-1], :]
+
+        # Apply specialized embeddings
+        source_emb = self.embedd_source(source)
+        destination_emb = self.embedding_destination(destination)
+        depot_emb = self.embedd_depot(depot)
+        candidates_emb = self.embedding_candidates(candidates)
+
+        # Return all embeddings and the number of candidates
+        return source_emb, candidates_emb, destination_emb, depot_emb
+
+
+class PointerDecoder(nn.Module):
+    def __init__(self, input_dim, embedding_dim, hidden_dim, num_heads, num_layers):
+        super(PointerDecoder, self).__init__()
+
+        # Node embedder to handle different node types
+        self.node_embedder = NodeEmbedder(input_dim, embedding_dim)
+
+        # Self-attention layers
+        self.self_attention_layers = nn.ModuleList(
+            [
+                nn.MultiheadAttention(
+                    embed_dim=embedding_dim, num_heads=num_heads, batch_first=True
+                )
+                for _ in range(num_layers)
+            ]
         )
 
-        self.decoder = nn.TransformerDecoder(self.self_attention, num_layers=num_layers)
-
-        # Fully connected layers for outputs
-        self.output_layer = nn.Linear(input_dim, output_dim)
-        self.decision_layer = nn.Linear(input_dim, decision_dim)
-
-    def forward(self, x, memory):
-        """
-        x: (batch_size, seq_len, input_dim) - The decoder input.
-        memory: (batch_size, seq_len, input_dim) - The encoder output.
-        """
-        # Project input into correct dimensional space
-        x = self.input_projection(x)
-
-        # expand the memory to the batch size of x
-        memory = memory.expand(x.shape[0], -1, -1)
-
-        decoded = self.decoder(x, memory)
-
-        # take last entry of the layer output
-        pooled = decoded[:, -1, :]
-
-        # Aggregate information using global mean pooling
-        # pooled = decoded.mean(dim=1)  # Reduces seq_len dimension
-
-        # TODO: This the best way to do this?
-        output_tensor = self.output_layer(pooled)  # (batch_size, city_size)
-        decision_tensor = self.decision_layer(pooled)  # (batch_size, 2)
-
-        return output_tensor, decision_tensor
-
-
-class DecoderCity(nn.Module):
-    def __init__(self, **model_params):
-        super().__init__()
-        self.model_params = model_params
-        embedding_dim = self.model_params["embedding_dim"]
-        embedding_dim = 32
-
-        self.embedd_source = nn.Linear(embedding_dim + 1, embedding_dim, bias=True)
-        self.embedding_destination = nn.Linear(
-            embedding_dim + 1, embedding_dim, bias=True
-        )
-        self.embedd_depot = nn.Linear(embedding_dim + 1, embedding_dim, bias=True)
-        self.embedding_candidates = nn.Linear(
-            embedding_dim + 1, embedding_dim, bias=True
+        # Feed-forward layers
+        self.ffn_layers = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(embedding_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, embedding_dim),
+                )
+                for _ in range(num_layers)
+            ]
         )
 
-        self.decoder = DecoderCityHelp(
-            input_dim=embedding_dim,
-            hidden_dim=model_params["hidden_dim"],
-            num_heads=model_params["head_num"],
-            num_layers=model_params["decoder_layer_num"],
-            output_dim=model_params["city_size"],
-            decision_dim=2,
+        # Layer normalization
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(embedding_dim) for _ in range(num_layers * 2)]
         )
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Pointer and flag classifier
+        self.pointer = nn.Linear(embedding_dim, 1)
+        self.flag_classifier = nn.Linear(embedding_dim, 2)
 
-    def forward(self, encoded_problems_reindexed, memory):
-        source = encoded_problems_reindexed[:, [0], :]
-        candidates = encoded_problems_reindexed[:, 1:-2, :]
-        destination = encoded_problems_reindexed[:, [-2], :]
-        depot = encoded_problems_reindexed[:, [-1], :]
+    def forward(self, solutions):
+        # Get embeddings for each node type
+        source_emb, candidates_emb, destination_emb, depot_emb = self.node_embedder(
+            solutions
+        )
 
-        # perform linear transformation on the embeddings
-        source = self.embedd_source(source)
-        destination = self.embedding_destination(destination)
-        depot = self.embedd_depot(depot)
-        candidates = self.embedding_candidates(candidates)
+        # Combine for decoder input
+        x = torch.cat((source_emb, candidates_emb, destination_emb, depot_emb), dim=1)
 
-        # TODO: think about having depot, source and destination in the memory (or at least the depot)
-        decoder_input = torch.cat((source, candidates, destination, depot), dim=1)
-        logits_student, logits_flag = self.decoder(decoder_input, memory)
+        # Process through transformer layers
+        for i in range(len(self.self_attention_layers)):
+            # Self-attention with residual connection
+            residual = x
+            x = self.layer_norms[i * 2](x)
+            x, _ = self.self_attention_layers[i](x, x, x)
+            x = x + residual
 
-        return logits_student, logits_flag
+            # Feed-forward with residual connection
+            residual = x
+            x = self.layer_norms[i * 2 + 1](x)
+            x = self.ffn_layers[i](x)
+            x = x + residual
+
+        # Pointer mechanism - only generate logits for candidate nodes
+        candidate_logits = self.pointer(
+            x[:, 1 : 1 + candidates_emb.size(1), :]
+        ).squeeze(-1)
+
+        # Flag classification using source node representation
+        flag_logits = self.flag_classifier(x[:, 0, :])
+
+        return candidate_logits, flag_logits
 
 
 class GeGnn(nn.Module):
