@@ -388,24 +388,7 @@ class LEHDTrainer(Solver):
             node_student = masked_logits_node.argmax(dim=1)
             flag_student = logits_flag.argmax(dim=1)
 
-            # Update capacity in problems tensor directly
-            # 1. If flag = 1, the vehicle returns to depot and capacity is refilled
-            is_depot = flag_student == 1
-            solutions[is_depot, :, 3] = capacities[is_depot, None]
-
-            # 2. Get demands of selected nodes using gather
-            selected_demands = solutions[:, 1, 2]
-
-            # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
-            smaller_ = solutions[:, 0, 3] < selected_demands
-            solutions[smaller_, :, 3] = capacities[smaller_, None]
-            flag_student[smaller_] = 1
-
-            # 4. Subtract demand from capacity
-            solutions[:, :, 3] = solutions[:, :, 3] - selected_demands[:, None]
-
             # 5. Update problems tensor for next step
-            # TODO: Continue here, find the indixes where solutions[:,i, 0] == node_student
             mask = solutions[:, :, 0] == node_student.unsqueeze(1)
 
             start_node = solutions[mask]
@@ -417,6 +400,22 @@ class LEHDTrainer(Solver):
 
             # switch the solution and move the student node indexes to the first entry
             solutions = torch.cat((start_node, solutions[:, 1:]), dim=1)
+
+            # Update capacity in problems tensor directly
+            # 1. If flag = 1, the vehicle returns to depot and capacity is refilled
+            is_depot = flag_student == 1
+            solutions[is_depot, :, 3] = capacities[is_depot, None]
+
+            # 2. Get demands of selected nodes using gather
+            selected_demands = solutions[:, 0, 2]
+
+            # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
+            smaller_ = solutions[:, 0, 3] < selected_demands
+            solutions[smaller_, :, 3] = capacities[smaller_, None]
+            flag_student[smaller_] = 1
+
+            # 4. Subtract demand from capacity
+            solutions[:, :, 3] = solutions[:, :, 3] - selected_demands[:, None]
 
             selected_student_list = torch.cat(
                 (selected_student_list, node_student.unsqueeze(1)), dim=1
