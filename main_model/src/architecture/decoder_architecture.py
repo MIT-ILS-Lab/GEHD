@@ -43,9 +43,9 @@ class LEHD(nn.Module):
         encoder_out[:, 0, -1] = 0.0
 
         # Forward through decoder
-        logits_node, logits_flag = self.decoder(encoder_out)
+        logits = self.decoder(encoder_out)
 
-        return logits_node, logits_flag
+        return logits
 
 
 class NodeEmbedder(nn.Module):
@@ -110,7 +110,7 @@ class PointerDecoder(nn.Module):
         )
 
         # Pointer and flag classifier
-        self.pointer = nn.Linear(embedding_dim, 1)
+        self.pointer = nn.Linear(embedding_dim, 2)
         self.flag_classifier = nn.Linear(embedding_dim, 2)
 
     def forward(self, solutions):
@@ -136,15 +136,20 @@ class PointerDecoder(nn.Module):
             x = self.ffn_layers[i](x)
             x = x + residual
 
-        # Pointer mechanism - only generate logits for candidate nodes
-        candidate_logits = self.pointer(
-            x[:, 1 : 1 + candidates_emb.size(1), :]
-        ).squeeze(-1)
+        logits = self.pointer(x)
 
-        # Flag classification using source node representation
-        flag_logits = self.flag_classifier(x[:, 0, :])
+        candidate_logits = logits[:, 1:-2, 0]
+        flag_logits = logits[:, 1:-2, 1]
 
-        return candidate_logits, flag_logits
+        logits = torch.cat(
+            [
+                candidate_logits,
+                flag_logits,
+            ],
+            dim=1,
+        )
+
+        return logits
 
 
 class GeGnn(nn.Module):

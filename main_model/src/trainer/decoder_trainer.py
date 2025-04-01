@@ -292,7 +292,7 @@ class LEHDTrainer(Solver):
         while (
             solutions.size(1) > 3
         ):  # if solutions.size(1) == 3, only start, destination and depot left
-            logits_node, logits_flag = self.model(
+            logits = self.model(
                 solutions,
                 capacities,
             )
@@ -300,11 +300,10 @@ class LEHDTrainer(Solver):
             node_teacher = torch.zeros(solutions.size(0), dtype=torch.int64)
             flag_teacher = solutions[:, 1, -1].to(torch.int64)
 
-            # Calculate loss with the position indices
-            loss_node = F.cross_entropy(logits_node, node_teacher)
-            loss_flag = F.cross_entropy(logits_flag, flag_teacher)
+            indices_teacher = node_teacher + flag_teacher * (solutions.size(1) - 3)
 
-            loss = loss_node + loss_flag
+            # Calculate loss with the position indices
+            loss = F.cross_entropy(logits, indices_teacher)
 
             # Backpropagate and update model
             self.model.zero_grad()
@@ -358,14 +357,19 @@ class LEHDTrainer(Solver):
         while (
             solutions.size(1) > 3
         ):  # if solutions.size(1) == 3, only start, destination and depot left
-            logits_node, logits_flag = self.model(
+            logits = self.model(
                 solutions,
                 capacities,
             )
 
-            # Select the highest scoring candidate
-            node_indices = logits_node.argmax(dim=1)
-            flag_student = logits_flag.argmax(dim=1)
+            indices = logits.argmax(dim=1)
+
+            assert logits.shape[1] == 2 * (
+                solutions.size(1) - 3
+            ), "Logits shape mismatch"
+
+            flag_student = (indices >= solutions.size(1) - 3).to(torch.int64)
+            node_indices = indices - flag_student * (solutions.size(1) - 3)
 
             # Update capacity in problems tensor directly
             solutions = solutions[:, 1:, :]
