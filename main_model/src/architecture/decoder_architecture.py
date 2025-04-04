@@ -8,11 +8,11 @@ from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
 
 class LEHD(nn.Module):
-    def __init__(self, **model_params):
+    def __init__(self, city_indices, **model_params):
         super().__init__()
         self.model_params = model_params
 
-        self.encoder = Encoder(**model_params)
+        self.encoder = Encoder(city_indices, **model_params)
 
         self.decoder = PointerDecoder(
             input_dim=model_params["pretrained_encoder"]["out_channels"] + 1,
@@ -43,9 +43,9 @@ class LEHD(nn.Module):
         encoder_out[:, 0, -1] = 0.0
 
         # Forward through decoder
-        logits = self.decoder(encoder_out)
+        logits, feasibility_logits = self.decoder(encoder_out)
 
-        return logits
+        return logits, feasibility_logits
 
 
 class NodeEmbedder(nn.Module):
@@ -81,6 +81,8 @@ class PointerDecoder(nn.Module):
 
         # Node embedder to handle different node types
         self.node_embedder = NodeEmbedder(input_dim, embedding_dim)
+
+        self.feasibility_predictor = nn.Linear(embedding_dim, 1)
 
         # Self-attention layers
         self.self_attention_layers = nn.ModuleList(
@@ -122,8 +124,27 @@ class PointerDecoder(nn.Module):
         # Combine for decoder input
         x = torch.cat((source_emb, candidates_emb, destination_emb, depot_emb), dim=1)
 
-        # Process through transformer layers
+        # Process through first transformer layer
+        residual = x
+        x = self.layer_norms[0](x)
+        x, _ = self.self_attention_layers[0](x, x, x)
+        x = x + residual
+
+        # Extract feasibility predictions after first layer (before bias)
+        feasibility_logits = self.feasibility_predictor(
+            x[:, 1:-2, :]
+        )  # Only for candidate nodes
+
+        # Continue with remaining layers
         for i in range(len(self.self_attention_layers)):
+            if i == 0:
+                # Already processed first layer
+                residual = x
+                x = self.layer_norms[1](x)
+                x = self.ffn_layers[0](x)
+                x = x + residual
+                continue
+
             # Self-attention with residual connection
             residual = x
             x = self.layer_norms[i * 2](x)
@@ -149,7 +170,7 @@ class PointerDecoder(nn.Module):
             dim=1,
         )
 
-        return logits
+        return logits, feasibility_logits.squeeze(-1)
 
 
 class GeGnn(nn.Module):
@@ -198,14 +219,13 @@ class GeGnn(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, **model_params):
+    def __init__(self, city_indices, **model_params):
         super().__init__()
         self.model_params = model_params
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         embedding_dim = self.model_params["embedding_dim"]
 
-        self.gegnn = GeGnn(self.model_params["pretrained_encoder"]).to(self.device)
-        self.gegnn.compute_embeddings()
+        self.prepare_embeddings(city_indices)
 
         self.transition_layer = nn.Linear(
             self.model_params["pretrained_encoder"]["out_channels"] + 1,
@@ -213,9 +233,11 @@ class Encoder(nn.Module):
             bias=True,
         )
 
-    def prepare_embedding(self, city_indexes):
-        self.gegnn.embds = self.gegnn.embds[city_indexes]
+    def prepare_embeddings(self, city_indexes):
+        gegnn = GeGnn(self.model_params["pretrained_encoder"]).to(self.device)
+        gegnn.compute_embeddings()
+        self.embeddings = gegnn.embds[city_indexes]
 
     def forward(self, solutions):
-        out = self.gegnn(solutions[:, :, 0].to(torch.int64))
+        out = self.embeddings[solutions[:, :, 0].to(torch.int64)]
         return out

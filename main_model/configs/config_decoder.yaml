@@ -37,6 +37,8 @@ solver:
     project_name: "decoder"
 
 data:
+  mesh:
+    mesh_path: "main_model/disk/problems/testing_1/mesh_data.h5"
   train:
     mode: "train"
 
@@ -49,7 +51,7 @@ data:
 
     # environment
     env:
-      data_path: "main_model/disk/problems/city_20/problems_20_train.h5"
+      data_path: "main_model/disk/problems/testing_1/cvrp_data_train_20.h5"
       sub_path: true
 
     # others
@@ -67,7 +69,7 @@ data:
 
     # environment
     env:
-      data_path: "main_model/disk/problems/city_20/problems_20_test.h5"
+      data_path: "main_model/disk/problems/testing_1/cvrp_data_test_20.h5"
       sub_path: false
 
     # others
@@ -76,7 +78,6 @@ data:
 model:
   embedding_dim: 128
   decoder_layer_num: 6
-  city_size: 21
   head_num: 8
   hidden_dim: 512
 

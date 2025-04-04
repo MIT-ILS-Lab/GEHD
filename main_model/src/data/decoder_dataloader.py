@@ -125,9 +125,6 @@ class LEHDDataset(Dataset):
         # Load the raw data
         self.load_raw_data(self.episodes)
 
-        # Load mesh data for computing node locations
-        self.load_mesh_data()
-
     def __len__(self):
         return len(self.raw_data_problems)
 
@@ -138,12 +135,6 @@ class LEHDDataset(Dataset):
 
         # Get problem indices
         problems = self.raw_data_problems[idx]
-
-        city_problems = self.city_indices[problems]
-
-        # Get node coordinates from mesh city using problem indices
-        # nodes = self.city[problem_indices]
-
         capacity = self.raw_data_capacity[idx]
         demand = self.raw_data_demand[idx]
         solution = self.raw_data_node_flag[idx]
@@ -153,7 +144,7 @@ class LEHDDataset(Dataset):
         problem = torch.cat(
             (
                 problems.unsqueeze(-1),
-                city_problems.unsqueeze(-1),
+                problems.unsqueeze(-1),  # TODO: Delete this
                 demand.unsqueeze(-1),
                 capacity_expanded.unsqueeze(-1),
             ),
@@ -172,20 +163,6 @@ class LEHDDataset(Dataset):
             "solution": solution,
             "capacity": capacity,
         }
-
-    def load_mesh_data(self):
-        """Load the mesh data to get node coordinates"""
-        with h5py.File(self.data_path, "r") as hf:
-            # Load mesh data
-            self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False)
-            self.faces = torch.tensor(hf["faces"][:], requires_grad=False)
-            self.city = torch.tensor(hf["city"][:], requires_grad=False)
-            self.city_indices = torch.tensor(hf["city_indices"][:], requires_grad=False)
-            self.geodesic_matrix = torch.tensor(
-                hf["geodesic_matrix"][:], requires_grad=False
-            )
-
-        logging.info(f"Loaded mesh data with {len(self.city)} city points")
 
     def load_raw_data(self, episode=1000000):
         logging.info(f"Start loading {self.mode} dataset from HDF5 file...")

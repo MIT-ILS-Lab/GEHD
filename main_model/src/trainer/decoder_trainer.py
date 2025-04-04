@@ -1,6 +1,7 @@
 import time
 import wandb
 import logging
+import h5py
 
 import torch
 import torch.nn.functional as F
@@ -49,6 +50,7 @@ class LEHDTrainer(Solver):
         super().__init__(config, is_master)
 
         # Store trainer and testing params
+        self.mesh_params = config["data"]["mesh"]
         self.trainer_params = config["data"]["train"]
         self.testing_params = config["data"]["test"]
 
@@ -59,7 +61,7 @@ class LEHDTrainer(Solver):
 
     def get_model(self, config):
         # Create and return the LEHD model
-        return LEHD(**config).to(self.device)
+        return LEHD(self.city_indices, **config).to(self.device)
 
     def get_dataset(self, config):
         return get_dataset(config)
@@ -67,13 +69,6 @@ class LEHDTrainer(Solver):
     def get_dataloader(self, config):
         # Override to use custom batch sampler
         dataset, collate_fn = self.get_dataset(config)
-
-        if self.city_indices is None:
-            self.city_indices = dataset.city_indices
-        else:
-            assert torch.equal(
-                self.city_indices, dataset.city_indices
-            ), "City indices do not match"
 
         # Determine if this is train or test config
         is_train = config["mode"] == "train"
@@ -103,8 +98,23 @@ class LEHDTrainer(Solver):
         )
         return data_loader
 
+    def config_mesh(self):
+        """Load the mesh data to get node coordinates"""
+        with h5py.File(self.mesh_params["mesh_path"], "r") as hf:
+            # Load mesh data
+            self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False)
+            self.faces = torch.tensor(hf["faces"][:], requires_grad=False)
+            self.city = torch.tensor(hf["city"][:], requires_grad=False)
+            self.city_indices = torch.tensor(hf["city_indices"][:], requires_grad=False)
+            self.geodesic_matrix = torch.tensor(
+                hf["geodesic_matrix"][:], requires_grad=False
+            )
+
+        logging.info(f"Loaded mesh data with {len(self.city)} city points")
+
     def train(self):
         self.manual_seed()
+        self.config_mesh()
         self.config_model()
         self.config_dataloader()
         self.config_optimizer()
@@ -113,8 +123,6 @@ class LEHDTrainer(Solver):
         self.load_checkpoint()
 
         self.time_estimator.reset(self.start_epoch)
-
-        self.model.encoder.prepare_embedding(self.city_indices)
 
         for epoch in range(self.start_epoch, self.config["solver"]["max_epoch"] + 1):
             logger.info(
@@ -189,12 +197,14 @@ class LEHDTrainer(Solver):
 
             if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
                 logger.info(
-                    "Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Time: {:.2f}".format(
+                    "Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Feasibility Loss: {:.4f} Combined: {:.4f} Time: {:.2f}".format(
                         epoch,
                         episode,
                         len(self.train_loader),
                         episode / len(self.train_loader) * 100,
                         output["train/loss"],
+                        output["train/feasibility_loss"],
+                        output["train/combined_loss"],
                         output["time/batch"].item() / 60,
                     )
                 )
@@ -209,8 +219,10 @@ class LEHDTrainer(Solver):
         logger.info(" ")
         logger.info("*** Summary ***")
         logger.info(
-            "Avg. Loss: {:.2f} Avg. Time: {:.2f} min".format(
+            "Avg. Loss: {:.2f} Avg. Feasibility Loss: {:.2f} Avg. Combined Loss: {:.2f} Avg. Time: {:.2f} min".format(
                 train_tracker_epoch.average()["train/loss"],
+                train_tracker_epoch.average()["train/feasibility_loss"],
+                train_tracker_epoch.average()["train/combined_loss"],
                 train_tracker_epoch.average()["time/batch"] / 60,
             )
         )
@@ -288,26 +300,37 @@ class LEHDTrainer(Solver):
         capacities = batch["capacities"].float()
 
         loss_list = []
+        feasibility_loss_list = []
+
         # Training loop for constructing solution
         while (
             solutions.size(1) > 3
         ):  # if solutions.size(1) == 3, only start, destination and depot left
-            logits = self.model(
+            logits, feasibility_logits = self.model(
                 solutions,
                 capacities,
             )
 
+            # Main routing loss
             node_teacher = torch.zeros(solutions.size(0), dtype=torch.int64)
             flag_teacher = solutions[:, 1, -1].to(torch.int64)
-
             indices_teacher = node_teacher + flag_teacher * (solutions.size(1) - 3)
-
-            # Calculate loss with the position indices
             loss = F.cross_entropy(logits, indices_teacher)
+
+            # Feasibility loss - create binary labels based on capacity constraints
+            remaining_capacity = solutions[:, 0, 3]
+            demands = solutions[:, 1:-2, 2]
+            feasibility_labels = (demands <= remaining_capacity.unsqueeze(1)).float()
+            feasibility_loss = F.binary_cross_entropy_with_logits(
+                feasibility_logits, feasibility_labels
+            )
+
+            # Combined loss with weighting
+            combined_loss = loss + 0.5 * feasibility_loss  # You can adjust the weight
 
             # Backpropagate and update model
             self.model.zero_grad()
-            loss.backward()
+            combined_loss.backward()
 
             self.clip_grad_norm()
             self.optimizer.step()
@@ -321,7 +344,6 @@ class LEHDTrainer(Solver):
             selected_demands = solutions[:, 1, 2]
 
             # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
-            # TODO: Does this ever happen since we are working with the teacher's solution?
             smaller_ = solutions[:, 0, 3] < selected_demands
             solutions[smaller_, :, 3] = capacities[smaller_, None]
 
@@ -332,12 +354,18 @@ class LEHDTrainer(Solver):
             solutions = solutions[:, 1:, :]
 
             loss_list.append(loss)
+            feasibility_loss_list.append(feasibility_loss)
 
         # Calculate final loss
         loss_mean = torch.stack(loss_list).mean()
+        feasibility_loss_mean = torch.stack(feasibility_loss_list).mean()
 
         # Return output dictionary for tracker
-        return {"train/loss": loss_mean}
+        return {
+            "train/loss": loss_mean,
+            "train/feasibility_loss": feasibility_loss_mean,
+            "train/combined_loss": loss_mean + 0.5 * feasibility_loss_mean,
+        }
 
     def test_step(self, batch):
         # Extract data from batch
@@ -357,7 +385,7 @@ class LEHDTrainer(Solver):
         while (
             solutions.size(1) > 3
         ):  # if solutions.size(1) == 3, only start, destination and depot left
-            logits = self.model(
+            logits, _ = self.model(
                 solutions,
                 capacities,
             )
@@ -465,8 +493,9 @@ class LEHDTrainer(Solver):
         order_flag_ = order_flag.clone()
 
         # Get the dataset to access the geodesic matrix
-        dataset = self.test_loader.dataset
-        geodesic_matrix = dataset.geodesic_matrix.to(self.device)
+        geodesic_matrix = self.geodesic_matrix.to(
+            self.device
+        )  # TODO: Skip this assignment
 
         index_small = torch.le(order_flag_, 0.5)
         index_bigger = torch.gt(order_flag_, 0.5)
