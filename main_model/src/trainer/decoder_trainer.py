@@ -326,7 +326,7 @@ class LEHDTrainer(Solver):
             )
 
             # Combined loss with weighting
-            combined_loss = loss + 0.5 * feasibility_loss  # You can adjust the weight
+            combined_loss = loss + feasibility_loss  # You can adjust the weight
 
             # Backpropagate and update model
             self.model.zero_grad()
@@ -371,6 +371,7 @@ class LEHDTrainer(Solver):
         # Extract data from batch
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
+        costs = batch["costs"].float()
 
         batch_size = solutions.size(0)
 
@@ -462,6 +463,8 @@ class LEHDTrainer(Solver):
             (selected_student_flag, solutions[:, -2, -1].unsqueeze(1)), dim=1
         )
 
+        depots = solutions_orig[:, -1, 0].unsqueeze(1)
+
         # Calculate optimal and student scores
         optimal_length = self.get_travel_distance(
             solutions_orig[:, :-1, 0]
@@ -470,11 +473,15 @@ class LEHDTrainer(Solver):
             solutions_orig[:, :-1, 4]
             .clone()
             .to(torch.int64),  # exclude depot from the solution vector
+            depots,
         )
         current_best_length = self.get_travel_distance(
             selected_student_list.clone().to(torch.int64),
             selected_student_flag.clone().to(torch.int64),
+            depots,
         )
+
+        assert (optimal_length - costs).mean() < 1e-1, "Optimal length mismatch"
 
         # Calculate gap as percentage
         gap = 100 * ((current_best_length - optimal_length) / optimal_length).mean()
@@ -486,7 +493,7 @@ class LEHDTrainer(Solver):
             "test/gap_percentage": gap,
         }
 
-    def get_travel_distance(self, order_node, order_flag):
+    def get_travel_distance(self, order_node, order_flag, depots):
         # order_node: [B,V]
         # order_flag: [B,V]
         order_node_ = order_node.clone()
@@ -501,7 +508,9 @@ class LEHDTrainer(Solver):
         index_bigger = torch.gt(order_flag_, 0.5)
 
         order_flag_[index_small] = order_node_[index_small]
-        order_flag_[index_bigger] = 0
+        order_flag_[index_bigger] = depots.expand_as(order_flag_)[index_bigger].to(
+            torch.int64
+        )
 
         roll_node = order_node_.roll(dims=1, shifts=1)
 
@@ -511,7 +520,7 @@ class LEHDTrainer(Solver):
 
         order_lengths = geodesic_matrix[order_loc, flag_loc]
 
-        order_flag_[:, 0] = 0
+        order_flag_[:, 0] = depots.squeeze(-1)
 
         flag_loc = order_flag_
 

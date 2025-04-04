@@ -139,6 +139,8 @@ class LEHDDataset(Dataset):
         demand = self.raw_data_demand[idx]
         solution = self.raw_data_node_flag[idx]
 
+        cost = self.raw_data_cost[idx]
+
         # Create the problem representation
         capacity_expanded = capacity.unsqueeze(0).repeat(solution.shape[0] + 1)
         problem = torch.cat(
@@ -162,6 +164,7 @@ class LEHDDataset(Dataset):
         return {
             "solution": solution,
             "capacity": capacity,
+            "cost": cost,
         }
 
     def load_raw_data(self, episode=1000000):
@@ -434,10 +437,12 @@ class LEHDDataset(Dataset):
 def collate_batch(batch):
     solutions = torch.stack([item["solution"] for item in batch])
     capacities = torch.stack([item["capacity"] for item in batch])
+    costs = torch.stack([item["cost"] for item in batch])
 
     batch_dict = {
         "solutions": solutions,
         "capacities": capacities.float(),
+        "costs": costs.float(),
     }
 
     return batch_dict
