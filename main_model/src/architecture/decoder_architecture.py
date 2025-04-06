@@ -54,25 +54,22 @@ class NodeEmbedder(nn.Module):
     def __init__(self, input_dim, embedding_dim):
         super(NodeEmbedder, self).__init__()
         self.embedd_source = nn.Linear(input_dim, embedding_dim, bias=True)
-        self.embedding_destination = nn.Linear(input_dim, embedding_dim, bias=True)
         self.embedd_depot = nn.Linear(input_dim, embedding_dim, bias=True)
         self.embedding_candidates = nn.Linear(input_dim, embedding_dim, bias=True)
 
     def forward(self, solutions):
         # Extract different node types
         source = solutions[:, [0], :]
-        candidates = solutions[:, 1:-2, :]
-        destination = solutions[:, [-2], :]
+        candidates = solutions[:, 1:-1, :]
         depot = solutions[:, [-1], :]
 
         # Apply specialized embeddings
         source_emb = self.embedd_source(source)
-        destination_emb = self.embedding_destination(destination)
         depot_emb = self.embedd_depot(depot)
         candidates_emb = self.embedding_candidates(candidates)
 
         # Return all embeddings and the number of candidates
-        return source_emb, candidates_emb, destination_emb, depot_emb
+        return source_emb, candidates_emb, depot_emb
 
 
 class PointerDecoder(nn.Module):
@@ -117,12 +114,10 @@ class PointerDecoder(nn.Module):
 
     def forward(self, solutions):
         # Get embeddings for each node type
-        source_emb, candidates_emb, destination_emb, depot_emb = self.node_embedder(
-            solutions
-        )
+        source_emb, candidates_emb, depot_emb = self.node_embedder(solutions)
 
         # Combine for decoder input
-        x = torch.cat((source_emb, candidates_emb, destination_emb, depot_emb), dim=1)
+        x = torch.cat((source_emb, candidates_emb, depot_emb), dim=1)
 
         # Process through first transformer layer
         residual = x
@@ -132,7 +127,7 @@ class PointerDecoder(nn.Module):
 
         # Extract feasibility predictions after first layer (before bias)
         feasibility_logits = self.feasibility_predictor(
-            x[:, 1:-2, :]
+            x[:, 1:-1, :]
         )  # Only for candidate nodes
 
         # Continue with remaining layers
@@ -159,8 +154,8 @@ class PointerDecoder(nn.Module):
 
         logits = self.pointer(x)
 
-        candidate_logits = logits[:, 1:-2, 0]
-        flag_logits = logits[:, 1:-2, 1]
+        candidate_logits = logits[:, 1:-1, 0]
+        flag_logits = logits[:, 1:-1, 1]
 
         logits = torch.cat(
             [

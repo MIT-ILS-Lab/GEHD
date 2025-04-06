@@ -304,7 +304,7 @@ class LEHDTrainer(Solver):
 
         # Training loop for constructing solution
         while (
-            solutions.size(1) > 3
+            solutions.size(1) > 2
         ):  # if solutions.size(1) == 3, only start, destination and depot left
             logits, feasibility_logits = self.model(
                 solutions,
@@ -312,14 +312,26 @@ class LEHDTrainer(Solver):
             )
 
             # Main routing loss
-            node_teacher = torch.zeros(solutions.size(0), dtype=torch.int64)
             flag_teacher = solutions[:, 1, -1].to(torch.int64)
-            indices_teacher = node_teacher + flag_teacher * (solutions.size(1) - 3)
-            loss = F.cross_entropy(logits, indices_teacher)
+
+            indices_flag = torch.roll(solutions[:, 1:-1, -1].to(torch.bool), shifts = -1, dims=1)
+            indices_flag += solutions[:, 1:-1, -1].to(torch.bool)
+            indices_flag = indices_flag.to(torch.int64)
+
+            indices_teacher = torch.zeros(logits.shape).to(self.device)
+            indices_teacher[:, 0] = 1.0 - flag_teacher
+            indices_teacher[:, (solutions.size(1) - 2) :] = (
+                indices_flag * flag_teacher[:, None]
+            )
+
+            indices_teacher = indices_teacher / indices_teacher.sum(dim=1, keepdim=True)
+
+            log_probs = F.log_softmax(logits, dim=1)
+            loss = F.kl_div(log_probs, indices_teacher, reduction="batchmean")
 
             # Feasibility loss - create binary labels based on capacity constraints
             remaining_capacity = solutions[:, 0, 3]
-            demands = solutions[:, 1:-2, 2]
+            demands = solutions[:, 1:-1, 2]
             feasibility_labels = (demands <= remaining_capacity.unsqueeze(1)).float()
             feasibility_loss = F.binary_cross_entropy_with_logits(
                 feasibility_logits, feasibility_labels
@@ -384,7 +396,7 @@ class LEHDTrainer(Solver):
         selected_student_flag = solutions[:, 0, -1].to(torch.int64).unsqueeze(1)
         # Training loop for constructing solution
         while (
-            solutions.size(1) > 3
+            solutions.size(1) > 2
         ):  # if solutions.size(1) == 3, only start, destination and depot left
             logits, _ = self.model(
                 solutions,
@@ -394,11 +406,11 @@ class LEHDTrainer(Solver):
             indices = logits.argmax(dim=1)
 
             assert logits.shape[1] == 2 * (
-                solutions.size(1) - 3
+                solutions.size(1) - 2
             ), "Logits shape mismatch"
 
-            flag_student = (indices >= solutions.size(1) - 3).to(torch.int64)
-            node_indices = indices - flag_student * (solutions.size(1) - 3)
+            flag_student = (indices >= solutions.size(1) - 2).to(torch.int64)
+            node_indices = indices - flag_student * (solutions.size(1) - 2)
 
             # Update capacity in problems tensor directly
             solutions = solutions[:, 1:, :]
@@ -456,12 +468,12 @@ class LEHDTrainer(Solver):
             )
 
         # Add target location to the solution
-        selected_student_list = torch.cat(
-            (selected_student_list, solutions[:, -2, 0].unsqueeze(1)), dim=1
-        )
-        selected_student_flag = torch.cat(
-            (selected_student_flag, solutions[:, -2, -1].unsqueeze(1)), dim=1
-        )
+        # selected_student_list = torch.cat(
+        #     (selected_student_list, solutions[:, -2, 0].unsqueeze(1)), dim=1
+        # )
+        # selected_student_flag = torch.cat(
+        #     (selected_student_flag, solutions[:, -2, -1].unsqueeze(1)), dim=1
+        # )
 
         depots = solutions_orig[:, -1, 0].unsqueeze(1)
 
