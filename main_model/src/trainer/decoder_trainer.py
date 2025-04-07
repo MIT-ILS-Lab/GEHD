@@ -314,7 +314,9 @@ class LEHDTrainer(Solver):
             # Main routing loss
             flag_teacher = solutions[:, 1, -1].to(torch.int64)
 
-            indices_flag = torch.roll(solutions[:, 1:-1, -1].to(torch.bool), shifts = -1, dims=1)
+            indices_flag = torch.roll(
+                solutions[:, 1:-1, -1].to(torch.bool), shifts=-1, dims=1
+            )
             indices_flag += solutions[:, 1:-1, -1].to(torch.bool)
             indices_flag = indices_flag.to(torch.int64)
 
@@ -328,6 +330,8 @@ class LEHDTrainer(Solver):
 
             log_probs = F.log_softmax(logits, dim=1)
             loss = F.kl_div(log_probs, indices_teacher, reduction="batchmean")
+
+            # loss = F.binary_cross_entropy_with_logits(logits, indices_teacher)
 
             # Feasibility loss - create binary labels based on capacity constraints
             remaining_capacity = solutions[:, 0, 3]
@@ -389,12 +393,14 @@ class LEHDTrainer(Solver):
 
         solutions_orig = solutions.clone()
 
-        start_node = solutions[:, 0, :]
-
-        # initialize selected node student list with an index of solutions[:, -1, 0]
-        selected_student_list = start_node[:, 0].unsqueeze(1)
-        selected_student_flag = solutions[:, 0, -1].to(torch.int64).unsqueeze(1)
+        selected_student_list = torch.empty(
+            (solutions.size(0), 0), device=solutions.device
+        )
+        selected_student_flag = torch.empty(
+            (solutions.size(0), 0), device=solutions.device, dtype=torch.int64
+        )
         # Training loop for constructing solution
+        first_step = True
         while (
             solutions.size(1) > 2
         ):  # if solutions.size(1) == 3, only start, destination and depot left
@@ -402,6 +408,15 @@ class LEHDTrainer(Solver):
                 solutions,
                 capacities,
             )
+
+            if not first_step:
+                remaining_capacity = solutions[:, 0, 3]
+                demands = solutions[:, 1:-1, 2]
+                feasibility_labels = demands <= remaining_capacity.unsqueeze(1)
+                logits[:, : solutions.size(1) - 2][~feasibility_labels] = -float("inf")
+            else:
+                logits[:, : solutions.size(1) - 2] = -float("inf")
+                first_step = False
 
             indices = logits.argmax(dim=1)
 
@@ -467,22 +482,14 @@ class LEHDTrainer(Solver):
                 (selected_student_flag, flag_student.unsqueeze(1)), dim=1
             )
 
-        # Add target location to the solution
-        # selected_student_list = torch.cat(
-        #     (selected_student_list, solutions[:, -2, 0].unsqueeze(1)), dim=1
-        # )
-        # selected_student_flag = torch.cat(
-        #     (selected_student_flag, solutions[:, -2, -1].unsqueeze(1)), dim=1
-        # )
-
         depots = solutions_orig[:, -1, 0].unsqueeze(1)
 
         # Calculate optimal and student scores
         optimal_length = self.get_travel_distance(
-            solutions_orig[:, :-1, 0]
+            solutions_orig[:, 1:-1, 0]
             .clone()
             .to(torch.int64),  # exclude depot from the solution vector
-            solutions_orig[:, :-1, 4]
+            solutions_orig[:, 1:-1, 4]
             .clone()
             .to(torch.int64),  # exclude depot from the solution vector
             depots,

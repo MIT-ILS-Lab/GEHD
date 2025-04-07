@@ -37,6 +37,7 @@ def reformat_solution(solution, problem):
     # extend the solution array with 0s on the first place
     reindex_list = torch.cat(
         (
+            torch.zeros((1,), dtype=torch.int),
             solution[:, 0],
             torch.zeros((1,), dtype=torch.int),
         ),
@@ -45,6 +46,7 @@ def reformat_solution(solution, problem):
 
     reindex_flag = torch.cat(
         (
+            torch.zeros((1,), dtype=torch.int),
             solution[:, 1],
             torch.zeros((1,), dtype=torch.int),
         ),
@@ -155,9 +157,7 @@ class LEHDDataset(Dataset):
 
         # Apply subpath sampling if needed, using the provided fixed_length
         if self.sub_path:
-            problem, solution = self.sampling_subpaths(
-                problem, solution, fixed_length=fixed_length
-            )
+            problem, solution = self.sampling_subpaths(problem, solution)
 
         solution = reformat_solution(solution, problem)
 
@@ -354,9 +354,7 @@ class LEHDDataset(Dataset):
             length_of_subpath = fixed_length
         else:
             # Random length of subpath between 4 and problem size
-            length_of_subpath = torch.randint(low=4, high=problems_size + 1, size=[1])[
-                0
-            ]
+            length_of_subpath = torch.tensor(problems_size)
 
         # Apply data augmentation
         solution = self.vrp_whole_and_solution_subrandom_inverse(
