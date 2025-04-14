@@ -60,6 +60,34 @@ def reformat_solution(solution, problem):
     return solution_extended
 
 
+class MultiInstanceLEHDDataset(Dataset):
+    """Wrapper dataset that handles multiple instance sizes"""
+
+    def __init__(self, data_paths, mode="test", episodes=-1, sub_path=False):
+        self.datasets = {
+            size: LEHDDataset(path, mode, episodes, sub_path)
+            for size, path in data_paths.items()
+        }
+        self.instance_sizes = list(data_paths.keys())
+        self.current_size = None  # Track current active size
+
+    def set_size(self, size):
+        """Switch active instance size"""
+        if size not in self.datasets:
+            raise ValueError(f"Invalid instance size {size}")
+        self.current_size = size
+        self.active_dataset = self.datasets[size]
+
+    def __len__(self):
+        return len(self.active_dataset) if self.current_size else 0
+
+    def __getitem__(self, idx):
+        return self.active_dataset[idx]
+
+    def get_all_sizes(self):
+        return self.instance_sizes
+
+
 class LEHDBatchSampler(torch.utils.data.Sampler):
     """
     BatchSampler that groups items into batches where each batch uses a fixed subpath length.
@@ -448,10 +476,21 @@ def collate_batch(batch):
 
 def get_dataset(config):
     # Create dataset
-    dataset = LEHDDataset(
-        data_path=config["env"]["data_path"],
-        episodes=config["episodes"],
-        mode=config["mode"],
-        sub_path=config["env"]["sub_path"],
-    )
+    if config["mode"] == "train":
+        dataset = LEHDDataset(
+            data_path=config["env"]["data_path"],
+            episodes=config["episodes"],
+            mode=config["mode"],
+            sub_path=config["env"]["sub_path"],
+        )
+    elif config["mode"] == "test":
+        dataset = MultiInstanceLEHDDataset(
+            data_paths=config["env"]["data_path"],
+            episodes=config["episodes"],
+            mode=config["mode"],
+            sub_path=config["env"]["sub_path"],
+        )
+    else:
+        raise ValueError(f"Invalid mode: {config['mode']}. Must be 'train' or 'test'.")
+
     return dataset, collate_batch

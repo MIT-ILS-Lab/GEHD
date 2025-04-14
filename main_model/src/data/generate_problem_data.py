@@ -173,6 +173,34 @@ def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0):
     }, city_size
 
 
+def load_mesh_data(mesh_path: str) -> dict:
+    """Loads mesh data from an HDF5 file.
+
+    Args:
+        mesh_path: Path to the HDF5 file containing mesh data.
+
+    Returns:
+        A dictionary containing the loaded mesh data.
+    """
+    logging.info(f"Loading mesh data from {mesh_path}...")
+    mesh_data = {}
+    with h5py.File(mesh_path, "r") as hf:
+        mesh_data["vertices"] = hf["vertices"][:]
+        mesh_data["faces"] = hf["faces"][:]
+        mesh_data["city"] = hf["city"][:]
+        mesh_data["city_indices"] = hf["city_indices"][:]
+        mesh_data["geodesic_matrix"] = hf["geodesic_matrix"][:]
+
+    # Reconstruct the mesh object
+    mesh_data["mesh"] = trimesh.Trimesh(
+        vertices=mesh_data["vertices"], faces=mesh_data["faces"], process=False
+    )
+
+    city_size = len(mesh_data["city_indices"]) - 1
+    logging.info(f"Successfully loaded mesh data from {mesh_path}")
+    return mesh_data, city_size
+
+
 def save_mesh_data(mesh_city: dict, output_dir: str, mesh_filename: str) -> None:
     """Saves mesh data to a separate HDF5 file."""
     os.makedirs(output_dir, exist_ok=True)
@@ -404,23 +432,6 @@ def access_mesh_cvrp_data(
 
     # Load problem data
     with h5py.File(problem_file, "r") as hf:
-        # If no separate mesh file, try to load mesh data from problem file
-        if not mesh_file:
-            if all(
-                key in hf
-                for key in [
-                    "vertices",
-                    "faces",
-                    "city",
-                    "city_indices",
-                    "geodesic_matrix",
-                ]
-            ):
-                result["vertices"] = hf["vertices"][:]
-                result["faces"] = hf["faces"][:]
-                result["city"] = hf["city"][:]
-                result["city_indices"] = hf["city_indices"][:]
-                result["geodesic_matrix"] = hf["geodesic_matrix"][:]
 
         # Problem-solution data
         result["problem"] = hf["problems"][problem_index]
@@ -444,34 +455,36 @@ if __name__ == "__main__":
 
     # Generate the mesh city once
     logging.info(f"Generating mesh city with {num_customers} customers...")
-    mesh_city, city_size = get_mesh_city(mesh_path, num_customers)
+    # mesh_city, city_size = get_mesh_city(mesh_path, num_customers)
 
-    # Save mesh data separately
-    save_mesh_data(mesh_city, output_dir, mesh_filename)
+    # # Save mesh data separately
+    # save_mesh_data(mesh_city, output_dir, mesh_filename)
+
+    mesh_city, city_size = load_mesh_data(os.path.join(output_dir, mesh_filename))
 
     # Training data parameters
-    train_problem_size = 20
-    num_problems_train = 1000
-    train_filename = f"cvrp_data_train_{train_problem_size}.h5"
+    # train_problem_size = 20
+    # num_problems_train = 1000
+    # train_filename = f"cvrp_data_train_{train_problem_size}.h5"
 
-    # Generate training problems (similar to before)
-    produce_problem_instances(
-        mesh_city=mesh_city,
-        city_size=city_size,
-        num_problems=num_problems_train,
-        problem_size=train_problem_size,
-        output_dir=output_dir,
-        filename=train_filename,
-        dmd_lower=1,
-        dmd_upper=9,
-        cap_lower=50,
-        cap_upper=50,
-        max_runtime=5,
-    )
+    # # Generate training problems (similar to before)
+    # produce_problem_instances(
+    #     mesh_city=mesh_city,
+    #     city_size=city_size,
+    #     num_problems=num_problems_train,
+    #     problem_size=train_problem_size,
+    #     output_dir=output_dir,
+    #     filename=train_filename,
+    #     dmd_lower=1,
+    #     dmd_upper=9,
+    #     cap_lower=50,
+    #     cap_upper=50,
+    #     max_runtime=5,
+    # )
 
     # Test data parameters - now with multiple problem sizes
-    test_problem_sizes = [20]  # List of different problem sizes
-    test_problem_nums = [100]  # Number of problems per size
+    test_problem_sizes = [10, 20]  # List of different problem sizes
+    test_problem_nums = [100, 100]  # Number of problems per size
 
     # Generate test problems for each size
     for problem_size, problem_num in zip(test_problem_sizes, test_problem_nums):
@@ -492,7 +505,11 @@ if __name__ == "__main__":
         )
 
     # Access and visualize a problem
-    data = access_mesh_cvrp_data(os.path.join(output_dir, train_filename), 0)
+    data = access_mesh_cvrp_data(
+        os.path.join(output_dir, train_filename),
+        os.path.join(output_dir, mesh_filename),
+        0,
+    )
     print(f"Problem size: {len(data['problem'])}")
     print(f"Solution distance: {data['distance']}")
     print(f"Node-flag format: {data['node_flag']}")

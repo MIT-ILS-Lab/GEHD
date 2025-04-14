@@ -66,6 +66,22 @@ class LEHDTrainer(Solver):
     def get_dataset(self, config):
         return get_dataset(config)
 
+    def config_dataloader(self, disable_train_data=False):
+        config_train, config_test = (
+            self.config["data"]["train"],
+            self.config["data"]["test"],
+        )
+
+        if not disable_train_data and not config_train["disable"]:
+            self.train_loader = self.get_dataloader(config_train)
+            self.train_iter = iter(self.train_loader)
+
+        if not config_test["disable"]:
+            self.test_loader = self.get_dataloader(config_test)
+            self.test_iter = {
+                key: iter(loader) for key, loader in self.test_loader.items()
+            }
+
     def get_dataloader(self, config):
         # Override to use custom batch sampler
         dataset, collate_fn = self.get_dataset(config)
@@ -74,29 +90,57 @@ class LEHDTrainer(Solver):
         is_train = config["mode"] == "train"
         params = self.trainer_params if is_train else self.testing_params
 
-        # Create batch sampler
-        dataset_size = len(dataset)
-        problem_size = dataset.raw_data_problems.shape[1] - 1
-        batch_sampler = LEHDBatchSampler(
-            dataset_size,
-            problem_size,
-            params["batch_size"],
-            params["shuffle"],
-        )
+        if not is_train:
+            dataloaders = {}
+            for size, sub_dataset in dataset.datasets.items():
+                dataset_size = len(sub_dataset)
+                problem_size = sub_dataset.raw_data_problems.shape[1] - 1
+                batch_sampler = LEHDBatchSampler(
+                    dataset_size,
+                    problem_size,
+                    params["batch_size"],
+                    params["shuffle"],
+                )
 
-        # Wrap it with the infinite sampler
-        infinite_batch_sampler = InfiniteLEHDBatchSampler(batch_sampler)
+                # Wrap it with the infinite sampler
+                infinite_batch_sampler = InfiniteLEHDBatchSampler(batch_sampler)
 
-        # Create and return dataloader
-        data_loader = DataLoader(
-            dataset,
-            batch_sampler=infinite_batch_sampler,
-            collate_fn=collate_fn,
-            num_workers=params["num_workers"],
-            pin_memory=True,
-            persistent_workers=True,
-        )
-        return data_loader
+                # Create and return dataloader
+                data_loader = DataLoader(
+                    sub_dataset,
+                    batch_sampler=infinite_batch_sampler,
+                    collate_fn=collate_fn,
+                    num_workers=params["num_workers"],
+                    pin_memory=True,
+                    persistent_workers=True,
+                )
+                dataloaders[size] = data_loader
+
+            return dataloaders
+        else:
+            # Create batch sampler
+            dataset_size = len(dataset)
+            problem_size = dataset.raw_data_problems.shape[1] - 1
+            batch_sampler = LEHDBatchSampler(
+                dataset_size,
+                problem_size,
+                params["batch_size"],
+                params["shuffle"],
+            )
+
+            # Wrap it with the infinite sampler
+            infinite_batch_sampler = InfiniteLEHDBatchSampler(batch_sampler)
+
+            # Create and return dataloader
+            data_loader = DataLoader(
+                dataset,
+                batch_sampler=infinite_batch_sampler,
+                collate_fn=collate_fn,
+                num_workers=params["num_workers"],
+                pin_memory=True,
+                persistent_workers=True,
+            )
+            return data_loader
 
     def config_mesh(self):
         """Load the mesh data to get node coordinates"""
@@ -156,6 +200,15 @@ class LEHDTrainer(Solver):
                 self.save_checkpoint(epoch)
                 logger.info("Saved checkpoint to %s" % self.ckpt_dir)
 
+    def test(self):
+        self.manual_seed()
+        self.config_mesh()
+        self.config_model()
+        self.configure_log(set_writer=False)
+        self.config_dataloader(disable_train_data=True)
+        self.load_checkpoint()
+        self.test_epoch(epoch=0)
+
     def train_epoch(self, epoch):
         self.model.train()
 
@@ -176,13 +229,13 @@ class LEHDTrainer(Solver):
                 for k, v in batch.items()
             }
 
-            elapsed_time["time/data"] = torch.Tensor([time.time() - tick])
+            elapsed_time["train/time/data"] = torch.Tensor([time.time() - tick])
 
             # forward and backward
             output = self.train_step(batch)
 
             # track the averaged tensors
-            elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
+            elapsed_time["train/time/batch"] = torch.Tensor([time.time() - tick])
             tick = time.time()
             output.update(elapsed_time)
             train_tracker.update(output)
@@ -205,7 +258,7 @@ class LEHDTrainer(Solver):
                         output["train/loss"],
                         output["train/feasibility_loss"],
                         output["train/combined_loss"],
-                        output["time/batch"].item() / 60,
+                        output["train/time/batch"].item() / 60,
                     )
                 )
 
@@ -223,76 +276,86 @@ class LEHDTrainer(Solver):
                 train_tracker_epoch.average()["train/loss"],
                 train_tracker_epoch.average()["train/feasibility_loss"],
                 train_tracker_epoch.average()["train/combined_loss"],
-                train_tracker_epoch.average()["time/batch"] / 60,
+                train_tracker_epoch.average()["train/time/batch"] / 60,
             )
         )
 
     def test_epoch(self, epoch):
         self.model.eval()
-        test_tracker = AverageTracker()
 
-        tick = time.time()  # Start time for batch timing
-        elapsed_time = dict()
+        for key in self.test_loader.keys():
 
-        for episode in range(1, len(self.test_loader) + 1):  # Simple loop without tqdm
-            # Load data
-            batch = self.test_iter.__next__()
-            batch["iter_num"] = episode
-            batch["epoch"] = epoch
+            # log which key we are currently testing
+            logger.info(f"*** Testing instance sice {key} ***")
 
-            batch = {
-                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                for k, v in batch.items()
-            }
+            test_tracker = AverageTracker()
+            tick = time.time()  # Start time for batch timing
+            elapsed_time = dict()
 
-            elapsed_time["time/data"] = torch.Tensor([time.time() - tick])
+            for episode in range(
+                1, len(self.test_loader[key]) + 1
+            ):  # Simple loop without tqdm
+                # Load data
+                batch = self.test_iter[key].__next__()
+                batch["iter_num"] = episode
+                batch["epoch"] = epoch
 
-            # Forward pass using test_step
-            with torch.no_grad():
-                output = self.test_step(batch)
+                batch = {
+                    k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                    for k, v in batch.items()
+                }
 
-            elapsed_time["time/batch"] = torch.Tensor([time.time() - tick])
-            tick = time.time()
-
-            # Update tracker with metrics and timing
-            output.update(elapsed_time)
-            test_tracker.update(output)
-
-            # Log per iteration if required
-            if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
-                logger.info(
-                    "Epoch {:3d}: Test {:3d}/{:3d} ({:5.1f}%) Gap: {:.4f} Time: {:.2f}".format(
-                        epoch,
-                        episode,
-                        len(self.test_loader),
-                        (episode) / len(self.test_loader) * 100,
-                        output["test/gap_percentage"],
-                        output["time/batch"].item() / 60,
-                    )
+                elapsed_time[f"test/{key}/time/data"] = torch.Tensor(
+                    [time.time() - tick]
                 )
 
-        # Log final averaged metrics to wandb and console
-        # Logg averages
-        logger.info(" ")
-        logger.info("*** Summary ***")
-        logger.info(
-            "Avg. Opt. Score: {:.2f}, Avg. St. Score: {:.2f}".format(
-                test_tracker.average()["test/optimal_score"],
-                test_tracker.average()["test/student_score"],
-            )
-        )
-        logger.info(
-            "Avg. Gap: {:.2f}%, Avg. Time {:.2f} min".format(
-                test_tracker.average()["test/gap_percentage"],
-                test_tracker.average()["time/batch"] / 60,
-            )
-        )
-        logger.info(" ")
+                # Forward pass using test_step
+                with torch.no_grad():
+                    output = self.test_step(batch, key)
 
-        if self.rank == 0:
-            log_data = test_tracker.average()
-            log_data["epoch"] = epoch
-            wandb.log(log_data, step=self.global_step)
+                elapsed_time[f"test/{key}/time/batch"] = torch.Tensor(
+                    [time.time() - tick]
+                )
+                tick = time.time()
+
+                # Update tracker with metrics and timing
+                output.update(elapsed_time)
+                test_tracker.update(output)
+
+                # Log per iteration if required
+                if self.log_per_iter > 0 and self.global_step % self.log_per_iter == 0:
+                    logger.info(
+                        "Epoch {:3d}: Test {:3d}/{:3d} ({:5.1f}%) Gap: {:.4f} Time: {:.2f}".format(
+                            epoch,
+                            episode,
+                            len(self.test_loader),
+                            (episode) / len(self.test_loader) * 100,
+                            output[f"test/{key}/gap_percentage"],
+                            output[f"test/{key}/time/batch"].item() / 60,
+                        )
+                    )
+
+            # Log final averaged metrics to wandb and console
+            # Logg averages
+            logger.info(" ")
+            logger.info("*** Summary ***")
+            logger.info(
+                "Avg. Opt. Score: {:.2f}, Avg. St. Score: {:.2f}".format(
+                    test_tracker.average()[f"test/{key}/optimal_score"],
+                    test_tracker.average()[f"test/{key}/student_score"],
+                )
+            )
+            logger.info(
+                "Avg. Gap: {:.2f}%, Avg. Time {:.2f} min".format(
+                    test_tracker.average()[f"test/{key}/gap_percentage"],
+                    test_tracker.average()[f"test/{key}/time/batch"] / 60,
+                )
+            )
+            logger.info(" ")
+
+            if self.rank == 0:
+                log_data = test_tracker.average()
+                wandb.log(log_data, step=self.global_step)
 
     def train_step(self, batch):
         # Extract data from batch
@@ -383,7 +446,7 @@ class LEHDTrainer(Solver):
             "train/combined_loss": loss_mean + 0.5 * feasibility_loss_mean,
         }
 
-    def test_step(self, batch):
+    def test_step(self, batch, key: None):
         # Extract data from batch
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
@@ -507,9 +570,9 @@ class LEHDTrainer(Solver):
 
         # Return output dictionary for tracker
         return {
-            "test/optimal_score": optimal_length.mean(),
-            "test/student_score": current_best_length.mean(),
-            "test/gap_percentage": gap,
+            f"test/{key}/optimal_score": optimal_length.mean(),
+            f"test/{key}/student_score": current_best_length.mean(),
+            f"test/{key}/gap_percentage": gap,
         }
 
     def get_travel_distance(self, order_node, order_flag, depots):
