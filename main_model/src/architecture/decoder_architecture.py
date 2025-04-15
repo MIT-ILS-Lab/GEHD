@@ -2,9 +2,87 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import math
+
 from main_model.src.utils.general_utils import read_mesh
 from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
+
+
+class ScalableSoftmax(nn.Module):
+    def __init__(self, s=0.43, learn_scaling=True, bias=False):
+        super().__init__()
+        self.s = nn.Parameter(torch.tensor(s)) if learn_scaling else s
+        self.bias = nn.Parameter(torch.tensor(0.0)) if bias else None
+
+    def forward(self, x):
+        # Get sequence length (n)
+        n = x.size(-1)
+        # Apply scaling with log(n)
+        scaled_x = x + self.s * torch.log(torch.tensor(n, device=x.device))
+        if self.bias is not None:
+            scaled_x = scaled_x + self.bias
+        # Apply standard softmax
+        return F.softmax(scaled_x, dim=-1)
+
+
+class SSMaxMultiheadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, s=0.43, learn_scaling=True):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+        self.dropout = nn.Dropout(dropout)
+        self.ssmax = ScalableSoftmax(s=s, learn_scaling=learn_scaling)
+
+    def forward(self, query, key, value, attn_mask=None):
+        batch_size = query.size(0)
+
+        # Linear projections and reshape
+        q = (
+            self.q_proj(query)
+            .view(batch_size, -1, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        k = (
+            self.k_proj(key)
+            .view(batch_size, -1, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        v = (
+            self.v_proj(value)
+            .view(batch_size, -1, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+
+        # Scaled dot-product attention
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+
+        if attn_mask is not None:
+            scores = scores.masked_fill(attn_mask == 0, -1e9)
+
+        # Apply SSMax instead of standard softmax
+        attn_weights = self.ssmax(scores)
+        attn_weights = self.dropout(attn_weights)
+
+        # Apply attention weights to values
+        attn_output = torch.matmul(attn_weights, v)
+
+        # Reshape and apply output projection
+        attn_output = (
+            attn_output.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, -1, self.embed_dim)
+        )
+        attn_output = self.out_proj(attn_output)
+
+        return attn_output, attn_weights
 
 
 class LEHD(nn.Module):
@@ -73,7 +151,16 @@ class NodeEmbedder(nn.Module):
 
 
 class PointerDecoder(nn.Module):
-    def __init__(self, input_dim, embedding_dim, hidden_dim, num_heads, num_layers):
+    def __init__(
+        self,
+        input_dim,
+        embedding_dim,
+        hidden_dim,
+        num_heads,
+        num_layers,
+        s=0.43,
+        learn_scaling=True,
+    ):
         super(PointerDecoder, self).__init__()
 
         # Node embedder to handle different node types
@@ -81,11 +168,14 @@ class PointerDecoder(nn.Module):
 
         self.feasibility_predictor = nn.Linear(embedding_dim, 1)
 
-        # Self-attention layers
+        # Replace standard MultiheadAttention with SSMax version
         self.self_attention_layers = nn.ModuleList(
             [
-                nn.MultiheadAttention(
-                    embed_dim=embedding_dim, num_heads=num_heads, batch_first=True
+                SSMaxMultiheadAttention(
+                    embed_dim=embedding_dim,
+                    num_heads=num_heads,
+                    s=s,
+                    learn_scaling=learn_scaling,
                 )
                 for _ in range(num_layers)
             ]

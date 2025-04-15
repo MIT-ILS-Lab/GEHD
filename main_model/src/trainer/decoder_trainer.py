@@ -3,6 +3,11 @@ import wandb
 import logging
 import h5py
 
+import polyscope as ps
+import trimesh
+import numpy as np
+import networkx as nx
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -16,6 +21,9 @@ from main_model.src.data.decoder_dataloader import (
     InfiniteLEHDBatchSampler,
     get_dataset,
 )
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +160,7 @@ class LEHDTrainer(Solver):
             self.city_indices = torch.tensor(hf["city_indices"][:], requires_grad=False)
             self.geodesic_matrix = torch.tensor(
                 hf["geodesic_matrix"][:], requires_grad=False
-            )
+            ).to(self.device)
 
         logging.info(f"Loaded mesh data with {len(self.city)} city points")
 
@@ -208,6 +216,14 @@ class LEHDTrainer(Solver):
         self.config_dataloader(disable_train_data=True)
         self.load_checkpoint()
         self.test_epoch(epoch=0)
+
+    def visualize(self):
+        self.manual_seed()
+        self.config_mesh()
+        self.config_model()
+        self.configure_log(set_writer=False)
+        self.config_dataloader(disable_train_data=True)
+        self.load_checkpoint()
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -446,7 +462,7 @@ class LEHDTrainer(Solver):
             "train/combined_loss": loss_mean + 0.5 * feasibility_loss_mean,
         }
 
-    def test_step(self, batch, key: None):
+    def test_step(self, batch, key: None, eval: False):
         # Extract data from batch
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
@@ -568,23 +584,29 @@ class LEHDTrainer(Solver):
         # Calculate gap as percentage
         gap = 100 * ((current_best_length - optimal_length) / optimal_length).mean()
 
-        # Return output dictionary for tracker
-        return {
-            f"test/{key}/optimal_score": optimal_length.mean(),
-            f"test/{key}/student_score": current_best_length.mean(),
-            f"test/{key}/gap_percentage": gap,
-        }
+        if not eval:
+            return {
+                f"test/{key}/optimal_score": optimal_length.mean(),
+                f"test/{key}/student_score": current_best_length.mean(),
+                f"test/{key}/gap_percentage": gap,
+            }
+        else:
+            return {
+                f"test/{key}/optimal_score": optimal_length.mean(),
+                f"test/{key}/student_score": current_best_length.mean(),
+                f"test/{key}/gap_percentage": gap,
+                f"test/{key}/optimal_solution/nodes": solutions_orig[:, 1:-1, 0],
+                f"test/{key}/optimal_solution/flags": solutions_orig[:, 1:-1, 4],
+                f"test/{key}/student_solution/nodes": selected_student_list,
+                f"test/{key}/student_solution/flags": selected_student_flag,
+                f"test/{key}/depots": depots,
+            }
 
     def get_travel_distance(self, order_node, order_flag, depots):
         # order_node: [B,V]
         # order_flag: [B,V]
         order_node_ = order_node.clone()
         order_flag_ = order_flag.clone()
-
-        # Get the dataset to access the geodesic matrix
-        geodesic_matrix = self.geodesic_matrix.to(
-            self.device
-        )  # TODO: Skip this assignment
 
         index_small = torch.le(order_flag_, 0.5)
         index_bigger = torch.gt(order_flag_, 0.5)
@@ -600,14 +622,169 @@ class LEHDTrainer(Solver):
         roll_loc = roll_node
         flag_loc = order_flag_
 
-        order_lengths = geodesic_matrix[order_loc, flag_loc]
+        order_lengths = self.geodesic_matrix[order_loc, flag_loc]
 
         order_flag_[:, 0] = depots.squeeze(-1)
 
         flag_loc = order_flag_
 
-        roll_lengths = geodesic_matrix[roll_loc, flag_loc]
+        roll_lengths = self.geodesic_matrix[roll_loc, flag_loc]
 
         length = order_lengths.sum(dim=1) + roll_lengths.sum(dim=1)
 
         return length
+
+    # def visualize_single_solution(self, nodes, flags, depot, key, mode):
+    #     node_sequence = []
+    #     for flag, node in zip(flags, nodes):
+    #         if flag.item() == 1:
+    #             node_sequence.append(int(depot.item()))
+
+    #         node_sequence.append(int(node.item()))
+
+    #     node_sequence.append(int(depot.item()))
+    #     node_sequence = self.city_indices[node_sequence]
+
+    #     depot = self.city_indices[int(depot.item())]
+
+    #     # TODO: Continue here
+
+    def visualize_single_solution(self, nodes, flags, depot, key, mode):
+        node_sequence = []
+        for flag, node in zip(flags, nodes):
+            if flag.item() == 1:
+                node_sequence.append(int(depot.item()))
+
+            node_sequence.append(int(node.item()))
+
+        node_sequence.append(int(depot.item()))
+        node_indices = self.city_indices[node_sequence].tolist()
+
+        depot_index = self.city_indices[int(depot.item())].tolist()
+
+        # Initialize Polyscope
+        ps.init()
+        ps.set_up_dir("z_up")
+
+        # Create Trimesh object
+        mesh = trimesh.Trimesh(vertices=self.vertices.numpy(), faces=self.faces.numpy())
+
+        # Build the graph
+        g = nx.Graph()
+        edges = mesh.edges_unique
+        length = mesh.edges_unique_length
+        for edge, L in zip(edges, length):
+            g.add_edge(*edge, length=L)
+
+        # Register mesh geometry in Polyscope
+        ps_mesh = ps.register_surface_mesh(
+            "Solution Mesh",
+            self.vertices.numpy(),
+            self.faces.numpy(),
+            color=(0.8, 0.8, 0.8),
+            transparency=0.7,
+        )
+
+        # Split solution into individual routes
+        routes = []
+        start_idx = 0
+        for i in range(1, len(node_indices)):
+            if node_indices[i] == depot_index:
+                routes.append(node_indices[start_idx : i + 1])
+                start_idx = i
+
+        # Visualize routes
+        colors = plt.cm.tab10.colors
+        for route_idx, route in enumerate(routes):
+            route_color = colors[route_idx % len(colors)]
+
+            # Collect all path segments
+            full_path = []
+            for i in range(len(route) - 1):
+                src, dst = route[i], route[i + 1]
+
+                path = nx.shortest_path(g, source=src, target=dst, weight="length")
+                path_points = mesh.vertices[path]
+                full_path.extend(path_points)
+
+            # Create polyline for this route
+            if len(full_path) > 1:
+                ps_curve = ps.register_curve_network(
+                    f"Route {route_idx+1}",
+                    np.array(full_path),
+                    edges=np.array([[i, i + 1] for i in range(len(full_path) - 1)]),
+                    color=route_color,
+                    radius=0.005,
+                )
+
+        # Visualize nodes
+        all_nodes = np.unique(np.concatenate(routes))
+        node_coords = self.vertices.numpy()[all_nodes]
+
+        # Create node labels and colors
+        node_types = np.where(all_nodes == depot_index, "Depot", "Customer")
+        node_colors = np.array(
+            [(1, 0, 0) if n == depot_index else (0, 0.5, 1) for n in all_nodes]
+        )
+
+        ps_nodes = ps.register_point_cloud(
+            "Nodes", node_coords, radius=0.03, enabled=True
+        )
+        ps_nodes.add_color_quantity("Node Type", node_colors, enabled=True)
+
+        ps.show()
+
+    def visualize_solutions(self, keys=None):
+        self.model.eval()
+
+        keys = keys if keys is not None else self.test_loader.keys()
+
+        for key in keys:
+            assert key in self.test_loader.keys(), f"Key {key} not found in test_loader"
+
+        for key in keys:
+            test_tracker = AverageTracker()
+            tick = time.time()  # Start time for batch timing
+            elapsed_time = dict()
+
+            batch = self.test_iter[key].__next__()
+
+            batch = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
+
+            elapsed_time[f"test/{key}/time/data"] = torch.Tensor([time.time() - tick])
+
+            # Forward pass using test_step
+            with torch.no_grad():
+                output = self.test_step(batch, key, eval=True)
+
+            elapsed_time[f"test/{key}/time/batch"] = torch.Tensor([time.time() - tick])
+            tick = time.time()
+
+            # Update tracker with metrics and timing
+            output.update(elapsed_time)
+            test_tracker.update(output)
+
+            optimal_solution_nodes = output[f"test/{key}/optimal_solution/nodes"]
+            optimal_solution_flags = output[f"test/{key}/optimal_solution/flags"]
+            student_solution_nodes = output[f"test/{key}/student_solution/nodes"]
+            student_solution_flags = output[f"test/{key}/student_solution/flags"]
+            depots = output[f"test/{key}/depots"]
+
+            for i in range(optimal_solution_nodes.shape[0]):
+                optimal_nodes = optimal_solution_nodes[i]
+                optimal_flags = optimal_solution_flags[i]
+                student_nodes = student_solution_nodes[i]
+                student_flags = student_solution_flags[i]
+
+                depot = depots[i]
+
+                # Visualize the solutions
+                self.visualize_single_solution(
+                    optimal_nodes, optimal_flags, depot, key, "optimal"
+                )
+                self.visualize_single_solution(
+                    student_nodes, student_flags, depot, key, "student"
+                )
