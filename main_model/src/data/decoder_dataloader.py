@@ -37,6 +37,7 @@ def reformat_solution(solution, problem):
     # extend the solution array with 0s on the first place
     reindex_list = torch.cat(
         (
+            torch.zeros((1,), dtype=torch.int),
             solution[:, 0],
             torch.zeros((1,), dtype=torch.int),
         ),
@@ -45,6 +46,7 @@ def reformat_solution(solution, problem):
 
     reindex_flag = torch.cat(
         (
+            torch.zeros((1,), dtype=torch.int),
             solution[:, 1],
             torch.zeros((1,), dtype=torch.int),
         ),
@@ -56,6 +58,34 @@ def reformat_solution(solution, problem):
     # concatenate the flag to the reindexed problems
     solution_extended = torch.cat((solution_extended, reindex_flag.unsqueeze(1)), dim=1)
     return solution_extended
+
+
+class MultiInstanceLEHDDataset(Dataset):
+    """Wrapper dataset that handles multiple instance sizes"""
+
+    def __init__(self, data_paths, mode="test", episodes=-1, sub_path=False):
+        self.datasets = {
+            size: LEHDDataset(path, mode, episodes, sub_path)
+            for size, path in data_paths.items()
+        }
+        self.instance_sizes = list(data_paths.keys())
+        self.current_size = None  # Track current active size
+
+    def set_size(self, size):
+        """Switch active instance size"""
+        if size not in self.datasets:
+            raise ValueError(f"Invalid instance size {size}")
+        self.current_size = size
+        self.active_dataset = self.datasets[size]
+
+    def __len__(self):
+        return len(self.active_dataset) if self.current_size else 0
+
+    def __getitem__(self, idx):
+        return self.active_dataset[idx]
+
+    def get_all_sizes(self):
+        return self.instance_sizes
 
 
 class LEHDBatchSampler(torch.utils.data.Sampler):
@@ -125,9 +155,6 @@ class LEHDDataset(Dataset):
         # Load the raw data
         self.load_raw_data(self.episodes)
 
-        # Load mesh data for computing node locations
-        self.load_mesh_data()
-
     def __len__(self):
         return len(self.raw_data_problems)
 
@@ -138,22 +165,18 @@ class LEHDDataset(Dataset):
 
         # Get problem indices
         problems = self.raw_data_problems[idx]
-
-        city_problems = self.city_indices[problems]
-
-        # Get node coordinates from mesh city using problem indices
-        # nodes = self.city[problem_indices]
-
         capacity = self.raw_data_capacity[idx]
         demand = self.raw_data_demand[idx]
         solution = self.raw_data_node_flag[idx]
+
+        cost = self.raw_data_cost[idx]
 
         # Create the problem representation
         capacity_expanded = capacity.unsqueeze(0).repeat(solution.shape[0] + 1)
         problem = torch.cat(
             (
                 problems.unsqueeze(-1),
-                city_problems.unsqueeze(-1),
+                problems.unsqueeze(-1),  # TODO: Delete this
                 demand.unsqueeze(-1),
                 capacity_expanded.unsqueeze(-1),
             ),
@@ -162,30 +185,15 @@ class LEHDDataset(Dataset):
 
         # Apply subpath sampling if needed, using the provided fixed_length
         if self.sub_path:
-            problem, solution = self.sampling_subpaths(
-                problem, solution, fixed_length=fixed_length
-            )
+            problem, solution = self.sampling_subpaths(problem, solution)
 
         solution = reformat_solution(solution, problem)
 
         return {
             "solution": solution,
             "capacity": capacity,
+            "cost": cost,
         }
-
-    def load_mesh_data(self):
-        """Load the mesh data to get node coordinates"""
-        with h5py.File(self.data_path, "r") as hf:
-            # Load mesh data
-            self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False)
-            self.faces = torch.tensor(hf["faces"][:], requires_grad=False)
-            self.city = torch.tensor(hf["city"][:], requires_grad=False)
-            self.city_indices = torch.tensor(hf["city_indices"][:], requires_grad=False)
-            self.geodesic_matrix = torch.tensor(
-                hf["geodesic_matrix"][:], requires_grad=False
-            )
-
-        logging.info(f"Loaded mesh data with {len(self.city)} city points")
 
     def load_raw_data(self, episode=1000000):
         logging.info(f"Start loading {self.mode} dataset from HDF5 file...")
@@ -374,9 +382,7 @@ class LEHDDataset(Dataset):
             length_of_subpath = fixed_length
         else:
             # Random length of subpath between 4 and problem size
-            length_of_subpath = torch.randint(low=4, high=problems_size + 1, size=[1])[
-                0
-            ]
+            length_of_subpath = torch.tensor(problems_size)
 
         # Apply data augmentation
         solution = self.vrp_whole_and_solution_subrandom_inverse(
@@ -457,10 +463,12 @@ class LEHDDataset(Dataset):
 def collate_batch(batch):
     solutions = torch.stack([item["solution"] for item in batch])
     capacities = torch.stack([item["capacity"] for item in batch])
+    costs = torch.stack([item["cost"] for item in batch])
 
     batch_dict = {
         "solutions": solutions,
         "capacities": capacities.float(),
+        "costs": costs.float(),
     }
 
     return batch_dict
@@ -468,10 +476,21 @@ def collate_batch(batch):
 
 def get_dataset(config):
     # Create dataset
-    dataset = LEHDDataset(
-        data_path=config["env"]["data_path"],
-        episodes=config["episodes"],
-        mode=config["mode"],
-        sub_path=config["env"]["sub_path"],
-    )
+    if config["mode"] == "train":
+        dataset = LEHDDataset(
+            data_path=config["env"]["data_path"],
+            episodes=config["episodes"],
+            mode=config["mode"],
+            sub_path=config["env"]["sub_path"],
+        )
+    elif config["mode"] == "test":
+        dataset = MultiInstanceLEHDDataset(
+            data_paths=config["env"]["data_path"],
+            episodes=config["episodes"],
+            mode=config["mode"],
+            sub_path=config["env"]["sub_path"],
+        )
+    else:
+        raise ValueError(f"Invalid mode: {config['mode']}. Must be 'train' or 'test'.")
+
     return dataset, collate_batch

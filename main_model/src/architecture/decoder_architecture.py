@@ -2,21 +2,105 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import math
+
 from main_model.src.utils.general_utils import read_mesh
 from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
 
+class ScalableSoftmax(nn.Module):
+    def __init__(self, s=0.43, learn_scaling=True, bias=False):
+        super().__init__()
+        self.s = nn.Parameter(torch.tensor(s)) if learn_scaling else s
+        self.bias = nn.Parameter(torch.tensor(0.0)) if bias else None
+
+    def forward(self, x):
+        # Get sequence length (n)
+        n = x.size(-1)
+        # Apply scaling with log(n)
+        scaled_x = x + self.s * torch.log(torch.tensor(n, device=x.device))
+        if self.bias is not None:
+            scaled_x = scaled_x + self.bias
+        # Apply standard softmax
+        return F.softmax(scaled_x, dim=-1)
+
+
+class SSMaxMultiheadAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, s=0.43, learn_scaling=True):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+        self.dropout = nn.Dropout(dropout)
+        self.ssmax = ScalableSoftmax(s=s, learn_scaling=learn_scaling)
+
+    def forward(self, query, key, value, attn_mask=None):
+        batch_size = query.size(0)
+
+        # Linear projections and reshape
+        q = (
+            self.q_proj(query)
+            .view(batch_size, -1, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        k = (
+            self.k_proj(key)
+            .view(batch_size, -1, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        v = (
+            self.v_proj(value)
+            .view(batch_size, -1, self.num_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+
+        # Scaled dot-product attention
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+
+        if attn_mask is not None:
+            scores = scores.masked_fill(attn_mask == 0, -1e9)
+
+        # Apply SSMax instead of standard softmax
+        attn_weights = self.ssmax(scores)
+        attn_weights = self.dropout(attn_weights)
+
+        # Apply attention weights to values
+        attn_output = torch.matmul(attn_weights, v)
+
+        # Reshape and apply output projection
+        attn_output = (
+            attn_output.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, -1, self.embed_dim)
+        )
+        attn_output = self.out_proj(attn_output)
+
+        return attn_output, attn_weights
+
+
 class LEHD(nn.Module):
-    def __init__(self, **model_params):
+    def __init__(self, city_indices, **model_params):
         super().__init__()
         self.model_params = model_params
 
-        self.encoder = Encoder(**model_params)
-        self.decoder = DecoderCity(**model_params)
+        self.encoder = Encoder(city_indices, **model_params)
+
+        self.decoder = PointerDecoder(
+            input_dim=model_params["pretrained_encoder"]["out_channels"] + 1,
+            embedding_dim=model_params["embedding_dim"],
+            hidden_dim=model_params["hidden_dim"],
+            num_heads=model_params["head_num"],
+            num_layers=model_params["decoder_layer_num"],
+        )
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         self.encoded_nodes = None
 
     def forward(
@@ -24,137 +108,154 @@ class LEHD(nn.Module):
         solutions,
         capacities=None,
     ):
-        # solution's shape : [B, V]
-        # TODO: This only works if all capacities are the same I guess
-        self.capacity = capacities.ravel()[0].item()
-        memory = self.encoder.gegnn.embds  # TODO: Quick fix
-
         remaining_capacity = solutions[:, 0, 3]
-
         encoder_out = self.encoder(solutions)
 
         normalized_demand = 2 * (
             (solutions[:, :, 2] - remaining_capacity[:, None]) / capacities[:, None]
         )
 
-        encoder_out = torch.cat(
-            (
-                encoder_out,
-                normalized_demand.unsqueeze(
-                    -1
-                ),  # TODO: This a good idea to divide by remaining capacity? Can sometimes be 0...
-            ),
-            dim=2,
-        )
+        encoder_out = torch.cat((encoder_out, normalized_demand.unsqueeze(-1)), dim=2)
 
-        # add remaining capacity for the source node TODO: Does it make sense to just leave this as is without this step?
+        # Set source node capacity to 0
         encoder_out[:, 0, -1] = 0.0
 
-        # TODO: Check this and how to handle memory
-        logits_node, logits_flag = self.decoder(encoder_out, memory)
+        # Forward through decoder
+        logits, feasibility_logits = self.decoder(encoder_out)
 
-        return logits_node, logits_flag
+        return logits, feasibility_logits
 
 
-class DecoderCityHelp(nn.Module):
+class NodeEmbedder(nn.Module):
+    """Separate module for embedding different node types"""
+
+    def __init__(self, input_dim, embedding_dim):
+        super(NodeEmbedder, self).__init__()
+        self.embedd_source = nn.Linear(input_dim, embedding_dim, bias=True)
+        self.embedd_depot = nn.Linear(input_dim, embedding_dim, bias=True)
+        self.embedding_candidates = nn.Linear(input_dim, embedding_dim, bias=True)
+
+    def forward(self, solutions):
+        # Extract different node types
+        source = solutions[:, [0], :]
+        candidates = solutions[:, 1:-1, :]
+        depot = solutions[:, [-1], :]
+
+        # Apply specialized embeddings
+        source_emb = self.embedd_source(source)
+        depot_emb = self.embedd_depot(depot)
+        candidates_emb = self.embedding_candidates(candidates)
+
+        # Return all embeddings and the number of candidates
+        return source_emb, candidates_emb, depot_emb
+
+
+class PointerDecoder(nn.Module):
     def __init__(
         self,
         input_dim,
+        embedding_dim,
         hidden_dim,
         num_heads,
         num_layers,
-        output_dim=10000,
-        decision_dim=2,
+        s=0.43,
+        learn_scaling=True,
     ):
-        super(DecoderCityHelp, self).__init__()
+        super(PointerDecoder, self).__init__()
 
-        # Linear projection layer to map input to correct dimension
-        self.input_projection = nn.Linear(input_dim, input_dim)
+        # Node embedder to handle different node types
+        self.node_embedder = NodeEmbedder(input_dim, embedding_dim)
 
-        # Transformer Decoder Layers (self-attention-based)
-        self.self_attention = nn.TransformerDecoderLayer(
-            d_model=input_dim,
-            nhead=num_heads,
-            dim_feedforward=hidden_dim,
-            batch_first=True,
+        self.feasibility_predictor = nn.Linear(embedding_dim, 1)
+
+        # Replace standard MultiheadAttention with SSMax version
+        self.self_attention_layers = nn.ModuleList(
+            [
+                SSMaxMultiheadAttention(
+                    embed_dim=embedding_dim,
+                    num_heads=num_heads,
+                    s=s,
+                    learn_scaling=learn_scaling,
+                )
+                for _ in range(num_layers)
+            ]
         )
 
-        self.decoder = nn.TransformerDecoder(self.self_attention, num_layers=num_layers)
-
-        # Fully connected layers for outputs
-        self.output_layer = nn.Linear(input_dim, output_dim)
-        self.decision_layer = nn.Linear(input_dim, decision_dim)
-
-    def forward(self, x, memory):
-        """
-        x: (batch_size, seq_len, input_dim) - The decoder input.
-        memory: (batch_size, seq_len, input_dim) - The encoder output.
-        """
-        # Project input into correct dimensional space
-        x = self.input_projection(x)
-
-        # expand the memory to the batch size of x
-        memory = memory.expand(x.shape[0], -1, -1)
-
-        decoded = self.decoder(x, memory)
-
-        # take last entry of the layer output
-        pooled = decoded[:, -1, :]
-
-        # Aggregate information using global mean pooling
-        # pooled = decoded.mean(dim=1)  # Reduces seq_len dimension
-
-        # TODO: This the best way to do this?
-        output_tensor = self.output_layer(pooled)  # (batch_size, city_size)
-        decision_tensor = self.decision_layer(pooled)  # (batch_size, 2)
-
-        return output_tensor, decision_tensor
-
-
-class DecoderCity(nn.Module):
-    def __init__(self, **model_params):
-        super().__init__()
-        self.model_params = model_params
-        embedding_dim = self.model_params["embedding_dim"]
-        embedding_dim = 32
-
-        self.embedd_source = nn.Linear(embedding_dim + 1, embedding_dim, bias=True)
-        self.embedding_destination = nn.Linear(
-            embedding_dim + 1, embedding_dim, bias=True
-        )
-        self.embedd_depot = nn.Linear(embedding_dim + 1, embedding_dim, bias=True)
-        self.embedding_candidates = nn.Linear(
-            embedding_dim + 1, embedding_dim, bias=True
+        # Feed-forward layers
+        self.ffn_layers = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(embedding_dim, hidden_dim),
+                    nn.ReLU(),
+                    nn.Linear(hidden_dim, embedding_dim),
+                )
+                for _ in range(num_layers)
+            ]
         )
 
-        self.decoder = DecoderCityHelp(
-            input_dim=embedding_dim,
-            hidden_dim=model_params["hidden_dim"],
-            num_heads=model_params["head_num"],
-            num_layers=model_params["decoder_layer_num"],
-            output_dim=model_params["city_size"],
-            decision_dim=2,
+        # Layer normalization
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(embedding_dim) for _ in range(num_layers * 2)]
         )
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Pointer and flag classifier
+        self.pointer = nn.Linear(embedding_dim, 2)
+        self.flag_classifier = nn.Linear(embedding_dim, 2)
 
-    def forward(self, encoded_problems_reindexed, memory):
-        source = encoded_problems_reindexed[:, [0], :]
-        candidates = encoded_problems_reindexed[:, 1:-2, :]
-        destination = encoded_problems_reindexed[:, [-2], :]
-        depot = encoded_problems_reindexed[:, [-1], :]
+    def forward(self, solutions):
+        # Get embeddings for each node type
+        source_emb, candidates_emb, depot_emb = self.node_embedder(solutions)
 
-        # perform linear transformation on the embeddings
-        source = self.embedd_source(source)
-        destination = self.embedding_destination(destination)
-        depot = self.embedd_depot(depot)
-        candidates = self.embedding_candidates(candidates)
+        # Combine for decoder input
+        x = torch.cat((source_emb, candidates_emb, depot_emb), dim=1)
 
-        # TODO: think about having depot, source and destination in the memory (or at least the depot)
-        decoder_input = torch.cat((source, candidates, destination, depot), dim=1)
-        logits_student, logits_flag = self.decoder(decoder_input, memory)
+        # Process through first transformer layer
+        residual = x
+        x = self.layer_norms[0](x)
+        x, _ = self.self_attention_layers[0](x, x, x)
+        x = x + residual
 
-        return logits_student, logits_flag
+        # Extract feasibility predictions after first layer (before bias)
+        feasibility_logits = self.feasibility_predictor(
+            x[:, 1:-1, :]
+        )  # Only for candidate nodes
+
+        # Continue with remaining layers
+        for i in range(len(self.self_attention_layers)):
+            if i == 0:
+                # Already processed first layer
+                residual = x
+                x = self.layer_norms[1](x)
+                x = self.ffn_layers[0](x)
+                x = x + residual
+                continue
+
+            # Self-attention with residual connection
+            residual = x
+            x = self.layer_norms[i * 2](x)
+            x, _ = self.self_attention_layers[i](x, x, x)
+            x = x + residual
+
+            # Feed-forward with residual connection
+            residual = x
+            x = self.layer_norms[i * 2 + 1](x)
+            x = self.ffn_layers[i](x)
+            x = x + residual
+
+        logits = self.pointer(x)
+
+        candidate_logits = logits[:, 1:-1, 0]
+        flag_logits = logits[:, 1:-1, 1]
+
+        logits = torch.cat(
+            [
+                candidate_logits,
+                flag_logits,
+            ],
+            dim=1,
+        )
+
+        return logits, feasibility_logits.squeeze(-1)
 
 
 class GeGnn(nn.Module):
@@ -203,14 +304,13 @@ class GeGnn(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, **model_params):
+    def __init__(self, city_indices, **model_params):
         super().__init__()
         self.model_params = model_params
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         embedding_dim = self.model_params["embedding_dim"]
 
-        self.gegnn = GeGnn(self.model_params["pretrained_encoder"]).to(self.device)
-        self.gegnn.compute_embeddings()
+        self.prepare_embeddings(city_indices)
 
         self.transition_layer = nn.Linear(
             self.model_params["pretrained_encoder"]["out_channels"] + 1,
@@ -218,9 +318,11 @@ class Encoder(nn.Module):
             bias=True,
         )
 
-    def prepare_embedding(self, city_indexes):
-        self.gegnn.embds = self.gegnn.embds[city_indexes]
+    def prepare_embeddings(self, city_indexes):
+        gegnn = GeGnn(self.model_params["pretrained_encoder"]).to(self.device)
+        gegnn.compute_embeddings()
+        self.embeddings = gegnn.embds[city_indexes]
 
     def forward(self, solutions):
-        out = self.gegnn(solutions[:, :, 0].to(torch.int64))
+        out = self.embeddings[solutions[:, :, 0].to(torch.int64)]
         return out

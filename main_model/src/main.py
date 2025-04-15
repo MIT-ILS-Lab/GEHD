@@ -65,3 +65,6 @@ if __name__ == "__main__":
 # 4. Remove hard-coded stuff, mesh_size, memory and improve readability of the decoder architecture
 # 5. Which masking is best, one where you mask all infeasible nodes or allow infeasible and do extra epot step
 # 6. Add second dataloader with only one iteration for specifically every element in the batch has flag 1 for more training data on these cases
+
+
+# --> Test capacity updating in the training as well as model itself
