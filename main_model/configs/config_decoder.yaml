@@ -2,7 +2,7 @@ solver:
   run: "train"
 
   # logging and processing
-  logdir: "main_model/logs/decoder"
+  logdir: "main_model/logs/decoder_test"
   max_epoch: 40
   test_every_epoch: 1
   save_every_epoch: 5
@@ -30,11 +30,13 @@ solver:
   rand_seed: 22
   empty_cache: true
   ckpt: null
+  # ckpt: "main_model/logs/decoder_test/checkpoints/00020.solver.tar"
   clip_grad: 0.0
 
   # wandb
   wandb:
     project_name: "decoder"
+    run_name: "tester"
 
 data:
   mesh:
@@ -45,7 +47,7 @@ data:
     # data loading
     batch_size: 16
     num_workers: 4
-    episodes: 1000    # -1 means all
+    episodes: 100    # -1 means all
 
     shuffle: true
 
@@ -61,15 +63,17 @@ data:
     mode: "test"
 
     # data loading
-    batch_size: 8
+    batch_size: 16
     num_workers: 4
-    episodes: 100    # -1 means all
+    episodes: -1    # -1 means all
 
     shuffle: false
 
     # environment
     env:
-      data_path: "main_model/disk/problems/testing_1/cvrp_data_test_20.h5"
+      data_path:
+        20: "main_model/disk/problems/testing_1/cvrp_data_test_20.h5"
+        10: "main_model/disk/problems/testing_1/cvrp_data_test_10.h5"
       sub_path: false
 
     # others
