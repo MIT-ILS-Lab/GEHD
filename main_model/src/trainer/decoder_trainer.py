@@ -6,7 +6,7 @@ import h5py
 import polyscope as ps
 import trimesh
 import numpy as np
-import networkx as nx
+import pygeodesic
 
 import torch
 import torch.nn.functional as F
@@ -634,47 +634,28 @@ class LEHDTrainer(Solver):
 
         return length
 
-    # def visualize_single_solution(self, nodes, flags, depot, key, mode):
-    #     node_sequence = []
-    #     for flag, node in zip(flags, nodes):
-    #         if flag.item() == 1:
-    #             node_sequence.append(int(depot.item()))
-
-    #         node_sequence.append(int(node.item()))
-
-    #     node_sequence.append(int(depot.item()))
-    #     node_sequence = self.city_indices[node_sequence]
-
-    #     depot = self.city_indices[int(depot.item())]
-
-    #     # TODO: Continue here
-
-    def visualize_single_solution(self, nodes, flags, depot, key, mode):
+    def visualize_single_solution(self, nodes, flags, depot):
         node_sequence = []
         for flag, node in zip(flags, nodes):
             if flag.item() == 1:
                 node_sequence.append(int(depot.item()))
-
             node_sequence.append(int(node.item()))
-
         node_sequence.append(int(depot.item()))
         node_indices = self.city_indices[node_sequence].tolist()
-
         depot_index = self.city_indices[int(depot.item())].tolist()
 
         # Initialize Polyscope
         ps.init()
         ps.set_up_dir("z_up")
+        ps.remove_all_structures()
 
         # Create Trimesh object
         mesh = trimesh.Trimesh(vertices=self.vertices.numpy(), faces=self.faces.numpy())
 
-        # Build the graph
-        g = nx.Graph()
-        edges = mesh.edges_unique
-        length = mesh.edges_unique_length
-        for edge, L in zip(edges, length):
-            g.add_edge(*edge, length=L)
+        # Initialize geodesic algorithm
+        geoalg = pygeodesic.geodesic.PyGeodesicAlgorithmExact(
+            self.vertices.numpy(), self.faces.numpy()
+        )
 
         # Register mesh geometry in Polyscope
         ps_mesh = ps.register_surface_mesh(
@@ -693,46 +674,76 @@ class LEHDTrainer(Solver):
                 routes.append(node_indices[start_idx : i + 1])
                 start_idx = i
 
-        # Visualize routes
+        # Assign route color to each node
         colors = plt.cm.tab10.colors
+        node_to_route_color = {}
         for route_idx, route in enumerate(routes):
             route_color = colors[route_idx % len(colors)]
+            for n in route:
+                node_to_route_color[n] = route_color
 
-            # Collect all path segments
+        # Visualize routes
+        for route_idx, route in enumerate(routes):
+            route_color = colors[route_idx % len(colors)]
             full_path = []
             for i in range(len(route) - 1):
                 src, dst = route[i], route[i + 1]
-
-                path = nx.shortest_path(g, source=src, target=dst, weight="length")
-                path_points = mesh.vertices[path]
-                full_path.extend(path_points)
-
-            # Create polyline for this route
+                path_points = self._get_geodesic_path(geoalg, src, dst)
+                if path_points is not None:
+                    full_path.extend(path_points)
             if len(full_path) > 1:
-                ps_curve = ps.register_curve_network(
-                    f"Route {route_idx+1}",
-                    np.array(full_path),
-                    edges=np.array([[i, i + 1] for i in range(len(full_path) - 1)]),
-                    color=route_color,
-                    radius=0.005,
+                self.visualize_geodesic_path(
+                    np.array(full_path), route_color, route_idx
                 )
 
-        # Visualize nodes
+        # Visualize nodes: smaller and colored by route
         all_nodes = np.unique(np.concatenate(routes))
         node_coords = self.vertices.numpy()[all_nodes]
-
-        # Create node labels and colors
-        node_types = np.where(all_nodes == depot_index, "Depot", "Customer")
-        node_colors = np.array(
-            [(1, 0, 0) if n == depot_index else (0, 0.5, 1) for n in all_nodes]
-        )
+        node_colors = []
+        for node_idx, node in enumerate(all_nodes):
+            if node == depot_index:
+                node_colors.append([1.0, 0.0, 0.0])  # Red for depot
+            else:
+                # Fetch route color, default to gray if not found
+                route_color = node_to_route_color.get(node, [0.5, 0.5, 0.5])
+                node_colors.append(route_color)
+        node_colors = np.array(node_colors)
 
         ps_nodes = ps.register_point_cloud(
-            "Nodes", node_coords, radius=0.03, enabled=True
+            "Nodes", node_coords, radius=0.015, enabled=True  # << SMALLER NODES!
         )
-        ps_nodes.add_color_quantity("Node Type", node_colors, enabled=True)
+        ps_nodes.add_color_quantity("Route color", node_colors, enabled=True)
 
         ps.show()
+
+    def _get_geodesic_path(self, geoalg, src_idx, dst_idx):
+        """Calculate geodesic distance between two nodes using pygeodesic"""
+        source_indices = np.array([src_idx], dtype=np.int32)
+        target_indices = np.array([dst_idx], dtype=np.int32)
+
+        # Calculate geodesic distance using pygeodesic
+        _, path = geoalg.geodesicDistance(target_indices, source_indices)
+        return path
+
+    def visualize_geodesic_path(self, geodesic_path, route_color, route_idx):
+        """Visualizes a geodesic path on a mesh using Polyscope.
+
+        Args:
+            geodesic_path (np.array): A numpy array of shape (N, 3) representing the 3D coordinates of the geodesic path.
+            route_color (tuple): A tuple of three floats representing the RGB color of the route (e.g., (1, 0, 0) for red).
+        """
+        if geodesic_path is None or len(geodesic_path) < 2:
+            print("Cannot visualize: Invalid or empty geodesic path.")
+            return
+
+        # Register the curve network with Polyscope
+        ps_curve = ps.register_curve_network(
+            f"Geodesic Path: {route_idx}",
+            geodesic_path,
+            edges=np.array([[i, i + 1] for i in range(len(geodesic_path) - 1)]),
+            color=route_color,
+            radius=0.005,
+        )
 
     def visualize_solutions(self, keys=None):
         self.model.eval()
@@ -782,9 +793,5 @@ class LEHDTrainer(Solver):
                 depot = depots[i]
 
                 # Visualize the solutions
-                self.visualize_single_solution(
-                    optimal_nodes, optimal_flags, depot, key, "optimal"
-                )
-                self.visualize_single_solution(
-                    student_nodes, student_flags, depot, key, "student"
-                )
+                self.visualize_single_solution(optimal_nodes, optimal_flags, depot)
+                self.visualize_single_solution(student_nodes, student_flags, depot)
