@@ -225,6 +225,10 @@ class LEHDTrainer(Solver):
         self.config_dataloader(disable_train_data=True)
         self.load_checkpoint()
 
+        assert (
+            self.config["solver"]["ckpt"] is not None
+        ), "Checkpoint path in ckpt need to be provided."
+
     def train_epoch(self, epoch):
         self.model.train()
 
@@ -462,7 +466,7 @@ class LEHDTrainer(Solver):
             "train/combined_loss": loss_mean + 0.5 * feasibility_loss_mean,
         }
 
-    def test_step(self, batch, key: None, eval: False):
+    def test_step(self, batch, key: None, eval: bool = False):
         # Extract data from batch
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
