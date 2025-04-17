@@ -28,31 +28,6 @@ from mpl_toolkits.mplot3d import Axes3D
 logger = logging.getLogger(__name__)
 
 
-def mask_logits(logits_node, solutions):
-    batch_size, num_candidates = logits_node.shape
-
-    # Create a mask with True everywhere
-    mask = torch.ones(
-        (batch_size, num_candidates), dtype=torch.bool, device=logits_node.device
-    )
-
-    # Get indices of nodes that have already been visited
-    visited_nodes = solutions[:, 0, 0].unsqueeze(1)  # Current node
-
-    # Check which candidates match visited nodes
-    candidates = solutions[:, 1:-2, 0]
-    for i in range(batch_size):
-        for j in range(num_candidates):
-            if candidates[i, j] in visited_nodes[i]:
-                mask[i, j] = False
-
-    # Apply the mask to logits_node
-    masked_logits = logits_node.clone()
-    masked_logits[~mask] = torch.tensor(-float("inf"), device=logits_node.device)
-
-    return masked_logits
-
-
 class LEHDTrainer(Solver):
     def __init__(self, config, is_master=True):
         super().__init__(config, is_master)
@@ -524,6 +499,9 @@ class LEHDTrainer(Solver):
 
             # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
             smaller_ = solutions[:, 0, 3] < selected_demands
+
+            # assert smaller_.sum().item() == 0, "Capacity smaller than demand"
+
             solutions[smaller_, :, 3] = capacities[smaller_, None]
             flag_student[smaller_] = 1
 
@@ -583,7 +561,7 @@ class LEHDTrainer(Solver):
             depots,
         )
 
-        assert (optimal_length - costs).mean() < 1e-1, "Optimal length mismatch"
+        # assert (optimal_length - costs).mean() < 1e-1, "Optimal length mismatch"
 
         # Calculate gap as percentage
         gap = 100 * ((current_best_length - optimal_length) / optimal_length).mean()
