@@ -59,12 +59,20 @@ if __name__ == "__main__":
 
 
 # TODO:
-# 1. Check if capacities get passed correctly / added to the embeddings to the model
-# 2. What to do with the memory for large instances (try different options)
-# 3. Model has difficulties predicting flag 1, either think of a better decoder model, go away from aligned representation or something else...
-# 4. Remove hard-coded stuff, mesh_size, memory and improve readability of the decoder architecture
-# 5. Which masking is best, one where you mask all infeasible nodes or allow infeasible and do extra epot step
-# 6. Add second dataloader with only one iteration for specifically every element in the batch has flag 1 for more training data on these cases
 
+# 7. Things to pay attention to:
+#   - 1. The feasibility loss, if to addit and where to get it from
+#   - 4. The mlp / encoder architecture
 
-# --> Test capacity updating in the training as well as model itself
+# 8. Research what training set to choose (real world, terrain, drones, etc., previous studies at best, something to compare to)
+
+# 9. How to train encoder, which output embedding dimension to use
+
+# 10. Fix logging of testing gap if needed
+# 11. Add a gap testing for different sizes, 200, 1000
+# 12. Add ability to load model from checkpoint
+# 13. Add a stopping criterion to not run the whole sequences
+
+# Compare both models for size 200 and 1000 to see which to choose (maybe one is way better than the other)
+# Write function for that, mean and variance for 100, 200, 1000, and plot them
+# Visualize the results on the mesh
