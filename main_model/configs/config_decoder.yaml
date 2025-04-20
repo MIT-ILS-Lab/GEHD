@@ -1,30 +1,31 @@
 solver:
   run: train
-  logdir: main_model/logs/decoder_100_long_2
-  max_epoch: 400
+  logdir: main_model/logs/decoder_100_long_rev
+  max_epoch: 200
   test_every_epoch: 1
   save_every_epoch: 5
   log_per_iter: 1
   type: adamw
   weight_decay: 0.01
-  lr: 0.00025
+  lr: 0.0001
   lr_type: poly
   lr_power: 0.9
   accumulation_steps: 1
   progress_bar: true
   rand_seed: 22
   empty_cache: true
-  ckpt: main_model/logs/decoder_100_long_2/checkpoints/00200.solver.tar
+  ckpt: null
+  # ckpt: main_model/logs/decoder_100_long_2/checkpoints/00200.solver.tar
   clip_grad: 0.0
   wandb:
     project_name: decoder_100
-    run_name: base_long_2_2
+    run_name: base_long_rev
 data:
   mesh:
     mesh_path: main_model/disk/problems/set_100/mesh_data.h5
   train:
     mode: train
-    batch_size: 512
+    batch_size: 256
     num_workers: 4
     episodes: -1
     shuffle: true

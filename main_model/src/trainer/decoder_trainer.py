@@ -472,14 +472,14 @@ class LEHDTrainer(Solver):
                 capacities,
             )
 
-            if not first_step:
-                remaining_capacity = solutions[:, 0, 3]
-                demands = solutions[:, 1:-1, 2]
-                feasibility_labels = demands <= remaining_capacity.unsqueeze(1)
-                logits[:, : solutions.size(1) - 2][~feasibility_labels] = -float("inf")
-            else:
-                logits[:, : solutions.size(1) - 2] = -float("inf")
-                first_step = False
+            # if not first_step:
+            #     remaining_capacity = solutions[:, 0, 3]
+            #     demands = solutions[:, 1:-1, 2]
+            #     feasibility_labels = demands <= remaining_capacity.unsqueeze(1)
+            #     logits[:, : solutions.size(1) - 2][~feasibility_labels] = -float("inf")
+            # else:
+            #     logits[:, : solutions.size(1) - 2] = -float("inf")
+            #     first_step = False
 
             indices = logits.argmax(dim=1)
 
