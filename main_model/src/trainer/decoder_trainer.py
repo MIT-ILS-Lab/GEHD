@@ -215,9 +215,15 @@ class LEHDTrainer(Solver):
         tick = time.time()
         elapsed_time = dict()
 
+        epoch_size = (
+            min(self.trainer_params["epoch_size"], len(self.train_loader))
+            if self.trainer_params["epoch_size"] > 0
+            else len(self.train_loader)
+        )
+
         train_tracker_epoch = AverageTracker()
 
-        for episode in range(1, len(self.train_loader) + 1):
+        for episode in range(1, epoch_size + 1):
             train_tracker = AverageTracker()
 
             # load data
@@ -253,8 +259,8 @@ class LEHDTrainer(Solver):
                     "Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Feasibility Loss: {:.4f} Combined: {:.4f} Time: {:.2f}".format(
                         epoch,
                         episode,
-                        len(self.train_loader),
-                        episode / len(self.train_loader) * 100,
+                        epoch_size,
+                        episode / epoch_size * 100,
                         output["train/loss"],
                         output["train/feasibility_loss"],
                         output["train/combined_loss"],
@@ -288,13 +294,17 @@ class LEHDTrainer(Solver):
             # log which key we are currently testing
             logger.info(f"*** Testing instance sice {key} ***")
 
+            epoch_size = (
+                min(self.testing_params["epoch_size"], len(self.test_loader[key]))
+                if self.testing_params["epoch_size"] > 0
+                else len(self.test_loader[key])
+            )
+
             test_tracker = AverageTracker()
             tick = time.time()  # Start time for batch timing
             elapsed_time = dict()
 
-            for episode in range(
-                1, len(self.test_loader[key]) + 1
-            ):  # Simple loop without tqdm
+            for episode in range(1, epoch_size + 1):  # Simple loop without tqdm
                 # Load data
                 batch = self.test_iter[key].__next__()
                 batch["iter_num"] = episode
@@ -328,8 +338,8 @@ class LEHDTrainer(Solver):
                         "Epoch {:3d}: Test {:3d}/{:3d} ({:5.1f}%) Gap: {:.4f} Time: {:.2f}".format(
                             epoch,
                             episode,
-                            len(self.test_loader),
-                            (episode) / len(self.test_loader) * 100,
+                            epoch_size,
+                            (episode) / epoch_size * 100,
                             output[f"test/{key}/gap_percentage"],
                             output[f"test/{key}/time/batch"].item() / 60,
                         )
