@@ -2,7 +2,7 @@ solver:
   run: train
 
   # logging and processing
-  logdir: main_model/logs/encoder_32
+  logdir: main_model/logs_2d/encoder_32
   max_epoch: 15
   test_every_epoch: 1
   save_every_epoch: 1
@@ -29,15 +29,18 @@ solver:
 
   # wandb
   wandb:
-    project_name: "encoder_32"
+    project_name: "encoder_32_2d"
     run_name: "my_encoder_run_32"
 
 data:
   preparation:
+    #type of the mesh
+    type: 2d # options are mesh, 2d and
+
     # paths to the different meshes
-    path_to_mesh: main_model/disk/meshes/
-    path_to_output_npz: main_model/disk/npz/
-    path_to_output_filelist: main_model/disk/filelist/
+    path_to_mesh: main_model/disk_2d/meshes/
+    path_to_output_npz: main_model/disk_2d/npz/
+    path_to_output_filelist: main_model/disk_2d/filelist/
 
     # variables for splitting and distance generation
     split_ratio: 0.8
@@ -59,9 +62,9 @@ data:
 
     # data loading
     location: ./
-    filelist: main_model/disk/filelist/filelist_train.txt
+    filelist: main_model/disk_2d/filelist/filelist_train.txt
     batch_size: 2
-    file_rep: 1 # number of times each file is repeated in the dataset
+    file_rep: 4 # number of times each file is repeated in the dataset
 
     shuffle: True
     num_workers: 0
@@ -79,7 +82,7 @@ data:
 
     # data loading
     location: ./
-    filelist: main_model/disk/filelist/filelist_test.txt
+    filelist: main_model/disk_2d/filelist/filelist_test.txt
     batch_size: 1
     file_rep: 1 # number of times each file is repeated in the dataset
 
