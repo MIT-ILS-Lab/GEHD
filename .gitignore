@@ -17,6 +17,7 @@ disk
 *.wandb
 *.tar
 *.pth
+*.npz
 
 events.*
 wandb*
