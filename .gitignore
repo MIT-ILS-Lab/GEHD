@@ -3,7 +3,8 @@ dist
 *.egg-info
 *.egg
 *.obj
-logs
+logs*
+*.logs
 *.txt
 *.log
 *.obj
@@ -18,6 +19,7 @@ disk
 *.tar
 *.pth
 *.npz
+*.h5
 
 events.*
 wandb*
