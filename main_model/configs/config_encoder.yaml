@@ -2,8 +2,8 @@ solver:
   run: train
 
   # logging and processing
-  logdir: main_model/logs_2d/encoder_32
-  max_epoch: 15
+  logdir: main_model/logs_sphere/encoder
+  max_epoch: 20000
   test_every_epoch: 1
   save_every_epoch: 1
   log_per_iter: 1
@@ -18,7 +18,7 @@ solver:
   lr_power: 0.9
 
   # gradient accumulation
-  accumulation_steps: 4 # gradient accumulation
+  accumulation_steps: 32 # gradient accumulation
 
   # others
   progress_bar: True
@@ -29,18 +29,18 @@ solver:
 
   # wandb
   wandb:
-    project_name: "encoder_32_2d"
-    run_name: "my_encoder_run_32"
+    project_name: "encoder_training"
+    run_name: "encoder_sphere"
 
 data:
   preparation:
     #type of the mesh
-    type: 2d # options are mesh, 2d and
+    type: sphere # options are sphere, 2d and
 
     # paths to the different meshes
-    path_to_mesh: main_model/disk_2d/meshes/
-    path_to_output_npz: main_model/disk_2d/npz/
-    path_to_output_filelist: main_model/disk_2d/filelist/
+    path_to_mesh: main_model/disk_sphere/meshes/
+    path_to_output_npz: main_model/disk_sphere/npz/
+    path_to_output_filelist: main_model/disk_sphere/filelist/
 
     # variables for splitting and distance generation
     split_ratio: 0.8
@@ -62,9 +62,9 @@ data:
 
     # data loading
     location: ./
-    filelist: main_model/disk_2d/filelist/filelist_train.txt
-    batch_size: 2
-    file_rep: 4 # number of times each file is repeated in the dataset
+    filelist: main_model/disk_sphere/filelist/filelist_train.txt
+    batch_size: 1
+    file_rep: 1 # number of times each file is repeated in the dataset
 
     shuffle: True
     num_workers: 0
@@ -82,7 +82,7 @@ data:
 
     # data loading
     location: ./
-    filelist: main_model/disk_2d/filelist/filelist_test.txt
+    filelist: main_model/disk_sphere/filelist/filelist_test.txt
     batch_size: 1
     file_rep: 1 # number of times each file is repeated in the dataset
 

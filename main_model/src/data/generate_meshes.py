@@ -57,7 +57,7 @@ if __name__ == "__main__":
         }
     elif TYPE == "2d":
         # Sample points in 2D space
-        num_points = 1000
+        num_points = 10000
         sample_points = np.random.rand(num_points, 2)
         mesh = create_flat_mesh(sample_points)
         shapes = {
