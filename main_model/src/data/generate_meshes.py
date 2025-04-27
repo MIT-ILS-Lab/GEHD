@@ -51,21 +51,43 @@ if __name__ == "__main__":
     if TYPE == "sphere":
         # Generate simple meshes and save them as .obj files
         subdivisions = 5
+        spheres = trimesh.creation.icosphere(subdivisions=subdivisions)
         shapes = {
             "sphere": trimesh.creation.icosphere(subdivisions=subdivisions),
-            "sphere_tilde": trimesh.creation.icosphere(subdivisions=subdivisions),
+            "sphere_tilde": spheres.copy(),
         }
     elif TYPE == "2d":
         # Sample points in 2D space
-        num_points = 10000
-        sample_points = np.random.rand(num_points, 2)
+        num_points_per_side = 100  # 100 x 100 = 10,000 points
+        x = np.linspace(0, 1, num_points_per_side)
+        y = np.linspace(0, 1, num_points_per_side)
+        grid_x, grid_y = np.meshgrid(x, y)
+        sample_points = np.vstack([grid_x.ravel(), grid_y.ravel()]).T
         mesh = create_flat_mesh(sample_points)
         shapes = {
             "2d_plane": mesh,
-            "2d_plane_tilde": mesh,
+            "2d_plane_tilde": mesh.copy(),
+        }
+    elif TYPE == "torus":
+        # Generate a torus with around 10k vertices
+        # Control sections to get approximately 10k faces
+        major_radius = 1.0
+        minor_radius = 0.3
+        major_sections = 100  # circles around main ring
+        minor_sections = 100  # points along each circle
+
+        torus = trimesh.creation.torus(
+            major_radius=major_radius,
+            minor_radius=minor_radius,
+            major_sections=major_sections,
+            minor_sections=minor_sections,
+        )
+        shapes = {
+            "torus": torus,
+            "torus_tilde": torus.copy(),
         }
     else:
-        raise ValueError(f"Invalid type: {TYPE}. Must be 'sphere' or '2d'.")
+        raise ValueError(f"Invalid type: {TYPE}. Must be 'sphere', '2d', or 'torus'.")
 
     # Save meshes as .obj files
     for name, mesh in shapes.items():
