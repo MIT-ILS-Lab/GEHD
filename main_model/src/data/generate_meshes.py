@@ -30,7 +30,6 @@ def create_flat_mesh(points_2d):
     mesh = trimesh.Trimesh(
         vertices=vertices,
         faces=faces,
-        # vertex_normals=np.tile([0, 0, 1], (len(vertices), 1)),
     )
 
     return mesh
@@ -86,9 +85,26 @@ if __name__ == "__main__":
             "torus": torus,
             "torus_tilde": torus.copy(),
         }
+    elif TYPE == "cube":
+        pitch = 0.035  # results in 9424 vertices
+        cube = trimesh.creation.box(extents=(1, 1, 1))
+
+        # Fill the bounding volume with voxels
+        voxelized = cube.voxelized(pitch=pitch)
+        boxes = voxelized.as_boxes()
+        mesh = trimesh.Trimesh(
+            vertices=boxes.vertices,
+            faces=boxes.faces,
+        )
+        shapes = {
+            "cube": cube,
+            "cube_tilde": cube.copy(),
+        }
     else:
         raise ValueError(f"Invalid type: {TYPE}. Must be 'sphere', '2d', or 'torus'.")
 
     # Save meshes as .obj files
     for name, mesh in shapes.items():
-        mesh.export(os.path.join(PATH_TO_MESH, f"{name}.obj"))
+        path = os.path.join(PATH_TO_MESH, f"{name}.obj")
+        mesh.export(path)
+        print(f"Saved {name} mesh to {path}")
