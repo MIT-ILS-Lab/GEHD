@@ -86,20 +86,7 @@ if __name__ == "__main__":
             "torus_tilde": torus.copy(),
         }
     elif TYPE == "cube":
-        pitch = 0.035  # results in 9424 vertices
-        cube = trimesh.creation.box(extents=(1, 1, 1))
-
-        # Fill the bounding volume with voxels
-        voxelized = cube.voxelized(pitch=pitch)
-        boxes = voxelized.as_boxes()
-        mesh = trimesh.Trimesh(
-            vertices=boxes.vertices,
-            faces=boxes.faces,
-        )
-        shapes = {
-            "cube": cube,
-            "cube_tilde": cube.copy(),
-        }
+        raise NotImplementedError("Cube mesh generation is not implemented yet.")
     else:
         raise ValueError(f"Invalid type: {TYPE}. Must be 'sphere', '2d', or 'torus'.")
 
