@@ -20,7 +20,8 @@ disk
 *.pth
 *.npz
 *.h5
-
+*.png
+*.DS_Store
 events.*
 wandb*
 __pycache__
