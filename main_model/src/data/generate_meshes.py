@@ -56,13 +56,38 @@ if __name__ == "__main__":
             "sphere_tilde": spheres.copy(),
         }
     elif TYPE == "2d":
-        # Sample points in 2D space
-        num_points_per_side = 100  # 100 x 100 = 10,000 points
-        x = np.linspace(0, 1, num_points_per_side)
-        y = np.linspace(0, 1, num_points_per_side)
+        # Create a regular 2D grid mesh on the [0,1] x [0,1] square
+        n = 100  # 100 x 100 = 10,000 vertices
+        x = np.linspace(0, 1, n)
+        y = np.linspace(0, 1, n)
         grid_x, grid_y = np.meshgrid(x, y)
-        sample_points = np.vstack([grid_x.ravel(), grid_y.ravel()]).T
-        mesh = create_flat_mesh(sample_points)
+        vertices_2d = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+        vertices_3d = np.hstack([vertices_2d, np.zeros((len(vertices_2d), 1))])
+
+        # Apply 45-degree rotation
+        rotation_angle = np.pi / 4
+        rotation_matrix = np.array(
+            [
+                [np.cos(rotation_angle), -np.sin(rotation_angle), 0],
+                [np.sin(rotation_angle), np.cos(rotation_angle), 0],
+                [0, 0, 1],
+            ]
+        )
+        vertices_3d = vertices_3d @ rotation_matrix.T
+
+        # Manually build triangle faces
+        faces = []
+        for i in range(n - 1):
+            for j in range(n - 1):
+                idx0 = i * n + j
+                idx1 = idx0 + 1
+                idx2 = idx0 + n
+                idx3 = idx2 + 1
+                faces.append([idx0, idx2, idx1])
+                faces.append([idx1, idx2, idx3])
+
+        mesh = trimesh.Trimesh(vertices=vertices_3d, faces=np.array(faces))
+
         shapes = {
             "2d_plane": mesh,
             "2d_plane_tilde": mesh.copy(),
