@@ -103,13 +103,14 @@ def main(config):
 
     if args.mode == "SSAD":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        obj_dic = read_mesh(args.test_file, device=device)
+        obj_dic = read_mesh(args.test_file)
         # print the vertex and face number
         print(
             "Vertex number: ",
             obj_dic["vertices"].shape[0],
             "Face number: ",
             obj_dic["faces"].shape[0],
+            1,
         )
         start_pts = torch.tensor(int(args.start_pts)).to(device)
 

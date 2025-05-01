@@ -28,6 +28,7 @@ faces = np.array(
 mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
 pink = [0.96, 0, 0.42]
+blue = [0.216, 0.522, 0.882]
 cyan = [0.22, 0.827, 0.835]
 
 # Initialize Polyscope
@@ -37,7 +38,7 @@ ps.init()
 ps_mesh = ps.register_surface_mesh("trimesh_mesh", mesh.vertices, mesh.faces)
 
 # --- Color Faces ---
-ps_mesh.set_color(cyan)
+ps_mesh.set_color(blue)
 
 # --- Set Edge Width ---
 edge_width = 1.05
@@ -55,6 +56,7 @@ highlight_curve = ps.register_curve_network(
 # Style the highlighted edge
 highlight_curve.set_radius(0.01)  # Thicker than normal mesh edges
 highlight_curve.set_enabled(True)
+highlight_curve.set_color(pink)  # Color of the highlighted edge
 
 # --- Set Material to 'clay' ---
 ps_mesh.set_material("clay")
