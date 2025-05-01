@@ -86,7 +86,55 @@ if __name__ == "__main__":
             "torus_tilde": torus.copy(),
         }
     elif TYPE == "cube":
-        raise NotImplementedError("Cube mesh generation is not implemented yet.")
+        # Generate a unit cube shell mesh with ~10,000 vertices
+        n = 41  # 6 * 41^2 ≈ 10,086 vertices total
+
+        lin = np.linspace(0, 1, n)
+        u, v = np.meshgrid(lin, lin)
+        u = u.ravel()
+        v = v.ravel()
+
+        vertices = []
+        faces = []
+
+        def add_face(offset, normal_axis, flip=False):
+            start_index = len(vertices)
+
+            if normal_axis == 0:  # x = const
+                coords = np.column_stack([np.full_like(u, offset), u, v])
+            elif normal_axis == 1:  # y = const
+                coords = np.column_stack([u, np.full_like(u, offset), v])
+            elif normal_axis == 2:  # z = const
+                coords = np.column_stack([u, v, np.full_like(u, offset)])
+
+            if flip:
+                coords = coords[:, [0, 2, 1]]
+
+            vertices.extend(coords)
+
+            for i in range(n - 1):
+                for j in range(n - 1):
+                    idx0 = start_index + i * n + j
+                    idx1 = idx0 + 1
+                    idx2 = idx0 + n
+                    idx3 = idx2 + 1
+                    faces.append([idx0, idx2, idx1])
+                    faces.append([idx1, idx2, idx3])
+
+        # Add all 6 faces
+        add_face(0, normal_axis=0, flip=True)
+        add_face(1, normal_axis=0)
+        add_face(0, normal_axis=1, flip=True)
+        add_face(1, normal_axis=1)
+        add_face(0, normal_axis=2, flip=True)
+        add_face(1, normal_axis=2)
+
+        cube_mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
+
+        shapes = {
+            "cube": cube_mesh,
+            "cube_tilde": cube_mesh.copy(),
+        }
     else:
         raise ValueError(f"Invalid type: {TYPE}. Must be 'sphere', '2d', or 'torus'.")
 
