@@ -10,8 +10,23 @@ from main_model.src.utils.general_utils import read_mesh
 from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
+from matplotlib.colors import LinearSegmentedColormap
 
-# a wrapper for the pretrained model
+# --- Custom colormap: cyan -> blue -> pink ---
+pink = [0.96, 0, 0.42]
+cyan = [0.22, 0.827, 0.835]
+blue = [0.216, 0.522, 0.882]
+cmap = LinearSegmentedColormap.from_list(
+    "cyan_pink",
+    [
+        (0.0, cyan),
+        (0.5, blue),
+        (0.8, pink),
+        (1.0, pink),
+    ],
+)
+
+
 class PretrainedGeGnn(nn.Module):
     def __init__(self, ckpt_path, config):
         super(PretrainedGeGnn, self).__init__()
@@ -65,17 +80,25 @@ class PretrainedGeGnn(nn.Module):
         return ret
 
 
-# a wrapper of pretrained model, so that it can be called directly from the command line
+def compute_geodesic_distances(vertices, faces, source_index=0):
+    from pygeodesic import geodesic
+
+    geoalg = geodesic.PyGeodesicAlgorithmExact(vertices, faces)
+    source_indices = np.array([source_index])
+    target_indices = None
+    distances, _ = geoalg.geodesicDistances(source_indices, target_indices)
+    return distances
+
+
 def main(config):
     # Load the latest checkpoint
     logdir = config["solver"]["logdir"]
-    ckpt_dir = os.path.join(logdir, "checkpoints")  # Checkpoint directory for past runs
-
+    ckpt_dir = os.path.join(logdir, "checkpoints")
     ckpt_files = [f for f in os.listdir(ckpt_dir) if f.endswith(".tar")]
     ckpt_files.sort()
     ckpt_path = os.path.join(ckpt_dir, ckpt_files[-1])
 
-    # Create a path to the first mesh file
+    # Mesh file path
     PATH_TO_MESH = config["data"]["preparation"]["path_to_mesh"]
     mesh_files = [f for f in os.listdir(PATH_TO_MESH) if f.endswith(".obj")]
     test_file = os.path.join(PATH_TO_MESH, mesh_files[0])
@@ -84,6 +107,7 @@ def main(config):
     output_dir = config["model"]["output_dir"]
     output_ssad = os.path.join(output_dir, "ssad_ours.npy")
     output_mesh = os.path.join(output_dir, "our_mesh.obj")
+    output_colors = os.path.join(output_dir, "our_mesh_colors.npy")
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -104,13 +128,11 @@ def main(config):
     if args.mode == "SSAD":
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         obj_dic = read_mesh(args.test_file)
-        # print the vertex and face number
         print(
             "Vertex number: ",
             obj_dic["vertices"].shape[0],
             "Face number: ",
             obj_dic["faces"].shape[0],
-            1,
         )
         start_pts = torch.tensor(int(args.start_pts)).to(device)
 
@@ -119,11 +141,10 @@ def main(config):
         dist_pred = model.SSAD([start_pts])[0]
         np.save(args.output, dist_pred.detach().cpu().numpy())
 
-        # save the colored mesh for visualization
-        # given the vertices, faces of a mesh, save it as obj file
+        # Save the colored mesh for visualization (optional, not used by polyscope)
         def save_mesh_as_obj(vertices, faces, scalar=None, path=output_mesh):
             with open(path, "w") as f:
-                f.write("# mesh\n")  # header of LittleRender
+                f.write("# mesh\n")
                 for v in vertices:
                     f.write("v " + str(v[0]) + " " + str(v[1]) + " " + str(v[2]) + "\n")
                 for face in faces:
@@ -137,13 +158,11 @@ def main(config):
                         + "\n"
                     )
                 if scalar is not None:
-                    # normalize the scalar to [0, 1]
                     scalar = (scalar - np.min(scalar)) / (
                         np.max(scalar) - np.min(scalar)
                     )
                     for c in scalar:
                         f.write("c " + str(c) + " " + str(c) + " " + str(c) + "\n")
-
             print("Saved mesh as obj file:", path, end="")
             if scalar is not None:
                 print(" (with color) ")
@@ -151,10 +170,70 @@ def main(config):
                 print(" (without color)")
 
         save_mesh_as_obj(
-            obj_dic["vertices"].detach().to(device).numpy(),
-            obj_dic["faces"].detach().to(device).numpy(),
-            dist_pred.detach().to(device).numpy(),
+            obj_dic["vertices"].detach().to(device).cpu().numpy(),
+            obj_dic["faces"].detach().to(device).cpu().numpy(),
+            dist_pred.detach().cpu().numpy(),
         )
+
+        # --- Load mesh for visualization ---
+        import polyscope as ps
+
+        mesh = trimesh.load_mesh(output_mesh, process=False)
+        vertices = mesh.vertices
+        faces = mesh.faces
+
+        # --- Compute true geodesic distances ---
+        source_index = int(args.start_pts)
+        geodist = compute_geodesic_distances(vertices, faces, source_index=source_index)
+
+        # --- Normalize everything to the same scale ---
+        dist_pred_np = dist_pred.detach().cpu().numpy()
+        maxval = max(np.max(dist_pred_np), np.max(geodist))
+        norm_pred = dist_pred_np / maxval
+        norm_geodist = geodist / maxval
+
+        # --- Apply power curve and colormap ---
+        power = 0.8
+        adjusted_pred = norm_pred**power
+        adjusted_geodist = norm_geodist**power
+        pred_colors = cmap(adjusted_pred)[:, :3]
+        geodist_colors = cmap(adjusted_geodist)[:, :3]
+
+        # --- Difference, mapped to same colormap (zero difference = blue) ---
+        diff = norm_pred - norm_geodist
+        max_abs = np.max(np.abs(diff))
+        if max_abs < 1e-8:
+            # Avoid division by zero if prediction is perfect
+            diff_centered = np.full_like(diff, 0.5)
+        else:
+            diff_centered = (diff + max_abs) / (2 * max_abs)
+        diff_adjusted = diff_centered**power
+        diff_colors = cmap(diff_adjusted)[:, :3]
+
+        # --- Save colors if needed ---
+        np.save(output_colors, pred_colors)
+
+        # --- Visualize with Polyscope ---
+        ps.init()
+        ps_mesh = ps.register_surface_mesh("mesh", vertices, faces)
+        ps_mesh.set_material("clay")
+        ps_mesh.set_edge_width(1.05)
+        ps.set_ground_plane_mode("none")
+
+        # Add all three color quantities
+        ps_mesh.add_color_quantity("Model Prediction", pred_colors, enabled=True)
+        ps_mesh.add_color_quantity("True Geodesic", geodist_colors, enabled=False)
+        ps_mesh.add_color_quantity("Difference (Pred-True)", diff_colors, enabled=False)
+
+        # --- Mark the source node ---
+        source_position = vertices[source_index].reshape(1, 3)
+        ps_cloud = ps.register_point_cloud("source_node", source_position)
+        ps_cloud.add_color_quantity(
+            "color", np.array([[1.0, 1.0, 0.0]]), enabled=True
+        )  # Yellow
+        ps_cloud.set_radius(0.01, relative=True)
+
+        ps.show()
 
     else:
         print("Invalid mode! (" + args.mode + ")")
@@ -167,34 +246,3 @@ if __name__ == "__main__":
 
     # Run main function
     main(config)
-
-    ###################################
-    # visualization via polyscope starts
-    # comment out the following lines if you are using ssh
-    ###################################
-    import polyscope as ps
-    import numpy as np
-    import trimesh
-
-    # Output directory
-    output_dir = config["model"]["output_dir"]
-    output_ssad = os.path.join(output_dir, "ssad_ours.npy")
-    output_mesh = os.path.join(output_dir, "our_mesh.obj")
-
-    # Load mesh
-    mesh = trimesh.load_mesh(output_mesh, process=False)
-    vertices = mesh.vertices
-    faces = mesh.faces
-
-    # Load color numpy array
-    colors = np.load(output_ssad)
-    print(colors.shape)
-
-    # Initialize polyscope
-    ps.init()
-    ps_cloud = ps.register_point_cloud("mesh", vertices)
-    ps_cloud.add_scalar_quantity("geo_distance", colors, enabled=True)
-    ps.show()
-    ###################################
-    # visualization via polyscope ends
-    ###################################
