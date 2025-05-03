@@ -11,6 +11,55 @@ from main_model.src.architecture.encoder_architecture import GraphUNet
 from main_model.src.utils.hgraph.hgraph import Data, HGraph
 
 from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import numpy as np
+
+
+def show_colormap_legend_horizontal(
+    cmap,
+    vmin,
+    vmax,
+    power=1.0,
+    label="Distance",
+    n_ticks=5,
+    filename="legend.png",
+    dpi=300,
+):
+    """
+    Save a high-quality horizontal legend for a colormap with a power curve.
+    - cmap: your matplotlib colormap
+    - vmin, vmax: value range (real values, not normalized)
+    - power: the power curve used in color mapping
+    - label: axis label
+    - n_ticks: number of ticks on the colorbar
+    - filename: output PNG filename
+    - dpi: output resolution
+    """
+    # Use Times New Roman font
+    plt.rcParams["font.family"] = "Times New Roman"
+
+    norm_vals = np.linspace(0, 1, 256)
+    adjusted = norm_vals**power
+
+    fig, ax = plt.subplots(figsize=(6, 1.2))
+    fig.subplots_adjust(bottom=0.5)
+    cb = plt.colorbar(
+        mpl.cm.ScalarMappable(cmap=cmap),
+        cax=ax,
+        orientation="horizontal",
+        ticks=np.linspace(0, 1, n_ticks),
+    )
+    tick_locs = np.linspace(0, 1, n_ticks)
+    tick_vals = vmin + (tick_locs ** (1 / power)) * (vmax - vmin)
+    cb.set_ticks(tick_locs)
+    cb.set_ticklabels([f"{v:.2f}" for v in tick_vals])
+    cb.set_label(label, fontsize=14, fontname="Times New Roman")
+    cb.ax.tick_params(labelsize=12)
+    plt.savefig(filename, bbox_inches="tight", dpi=dpi)
+    plt.close(fig)
+    print(f"Legend saved as {filename}")
+
 
 # --- Custom colormap: cyan -> blue -> pink ---
 pink = [0.96, 0, 0.42]
@@ -234,6 +283,26 @@ def main(config):
         ps_cloud.set_radius(0.01, relative=True)
 
         ps.show()
+
+        # For distances (model prediction or geodesic)
+        show_colormap_legend_horizontal(
+            cmap,
+            vmin=0,
+            vmax=maxval,
+            power=power,
+            label="Distance from source node",
+            filename="legend_distance.png",
+        )
+
+        # For differences (Pred - True), centered at 0
+        show_colormap_legend_horizontal(
+            cmap,
+            vmin=-max_abs,
+            vmax=+max_abs,
+            power=power,
+            label="Difference (Predicted - True)",
+            filename="legend_difference.png",
+        )
 
     else:
         print("Invalid mode! (" + args.mode + ")")
