@@ -25,3 +25,4 @@ disk
 events.*
 wandb*
 __pycache__
+*.svg
