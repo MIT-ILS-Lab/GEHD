@@ -1,3 +1,8 @@
+"""
+This file contains the code to generate the object data for the encoder and decoder from the constructed mesh.
+Call this function after the generate_meshes.py file.
+"""
+
 import os
 import multiprocessing as mp
 import random
@@ -18,30 +23,6 @@ logging.basicConfig(
         # logging.FileHandler("my_log_file.log"),  # Optionally, write logs to a file
     ],
 )
-
-
-def visualize_ssad(vertices: np.ndarray, triangles: np.ndarray, source_index: int):
-    # Initialise the PyGeodesicAlgorithmExact class instance
-    geoalg = geodesic.PyGeodesicAlgorithmExact(vertices, triangles)
-
-    # Define the source and target point ids with respect to the points array
-    source_indices = np.array([source_index])
-    target_indices = None
-    distances, _ = geoalg.geodesicDistances(source_indices, target_indices)
-    return distances
-
-
-def visualize_two_pts(
-    vertices: np.ndarray, triangles: np.ndarray, source_index: int, dest_index: int
-):
-    # Initialise the PyGeodesicAlgorithmExact class instance
-    geoalg = geodesic.PyGeodesicAlgorithmExact(vertices, triangles)
-
-    # Define the source and target point ids with respect to the points array
-    source_indices = np.array([source_index])
-    target_indices = np.array([dest_index])
-    distances, _ = geoalg.geodesicDistance(source_indices, target_indices)
-    return distances
 
 
 def data_prepare_gen_dataset(
@@ -118,7 +99,7 @@ def computation_thread(
     num_sources: int,
     num_targets: int,
     idx: int | None = None,
-):
+) -> None:
     """
     Runs the computation thread for the given object file.
 

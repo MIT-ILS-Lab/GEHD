@@ -1,6 +1,6 @@
 import yaml
 
-from main_model.src.trainer.decoder_trainer import LEHDTrainer
+from main_model.src.trainer.decoder_trainer import GEHDTrainer
 
 
 if __name__ == "__main__":
@@ -11,6 +11,6 @@ if __name__ == "__main__":
         config = yaml.safe_load(f)
     ## Load Trainer class
     # Initialize model and load checkpoint
-    trainer = LEHDTrainer(config)
+    trainer = GEHDTrainer(config)
     trainer.visualize()
     trainer.visualize_solutions(keys=[20])

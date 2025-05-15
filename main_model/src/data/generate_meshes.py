@@ -1,3 +1,8 @@
+"""
+This file contains the code to generate the meshes for the encoder and decoder.
+Call this function before the generate_object_data.py file.
+"""
+
 import os
 import trimesh
 import numpy as np
@@ -6,7 +11,7 @@ from scipy.spatial import Delaunay
 from main_model.src.utils.config import load_config, parse_args
 
 
-def create_flat_mesh(points_2d):
+def create_flat_mesh(points_2d: np.ndarray) -> trimesh.Trimesh:
     """Create 3D mesh from 2D points with z=0 and vertical normals"""
     # Convert to 3D coordinates
     vertices = np.hstack([points_2d, np.zeros((len(points_2d), 1))])

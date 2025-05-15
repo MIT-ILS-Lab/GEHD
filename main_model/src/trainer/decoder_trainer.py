@@ -1,36 +1,50 @@
-import time
-import wandb
+"""
+This file contains the GEHDTrainer class, which is a subclass of the Solver class.
+It is used to train the GEHD model.
+"""
+
 import logging
+import time
+from typing import Dict, List, Optional, Tuple, Union, Any
+
 import h5py
-
-import polyscope as ps
-import trimesh
-import numpy as np
-import pygeodesic
-
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
+import polyscope as ps
+import pygeodesic
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+import trimesh
+import wandb
 
-from main_model.src.utils.tracker import AverageTracker
-
-from main_model.src.architecture.decoder_architecture import LEHD
-from main_model.src.trainer.base_trainer import Solver
+from main_model.src.architecture.decoder_architecture import GEHD
 from main_model.src.data.decoder_dataloader import (
-    LEHDBatchSampler,
-    InfiniteLEHDBatchSampler,
+    GEHDBatchSampler,
+    InfiniteGEHDBatchSampler,
     get_dataset,
 )
-
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+from main_model.src.trainer.base_trainer import Solver
+from main_model.src.utils.tracker import AverageTracker
 
 logger = logging.getLogger(__name__)
 
 
-class LEHDTrainer(Solver):
-    def __init__(self, config, is_master=True):
+class GEHDTrainer(Solver):
+    """A trainer class for the GEHD (Geodesic-based Encoder-Decoder) model.
+
+    This class handles the training, testing, and visualization of the GEHD model,
+    which is designed to solve vehicle routing problems on meshes using geodesic distances.
+    """
+
+    def __init__(self, config: Dict[str, Any], is_master: bool = True) -> None:
+        """Initialize the GEHDTrainer.
+
+        Args:
+            config: Configuration dictionary containing model and training parameters
+            is_master: Whether this is the master process in distributed training
+        """
         super().__init__(config, is_master)
 
         # Store trainer and testing params
@@ -43,14 +57,34 @@ class LEHDTrainer(Solver):
         # Set random seed
         torch.manual_seed(22)
 
-    def get_model(self, config):
-        # Create and return the LEHD model
-        return LEHD(self.city_indices, **config).to(self.device)
+    def get_model(self, config: Dict[str, Any]) -> GEHD:
+        """Create and return the GEHD model.
 
-    def get_dataset(self, config):
+        Args:
+            config: Configuration dictionary containing model parameters
+
+        Returns:
+            GEHD: The initialized GEHD model
+        """
+        return GEHD(self.city_indices, **config).to(self.device)
+
+    def get_dataset(self, config: Dict[str, Any]) -> Tuple[Any, Any]:
+        """Get the dataset and collate function.
+
+        Args:
+            config: Configuration dictionary containing dataset parameters
+
+        Returns:
+            Tuple containing the dataset and collate function
+        """
         return get_dataset(config)
 
-    def config_dataloader(self, disable_train_data=False):
+    def config_dataloader(self, disable_train_data: bool = False) -> None:
+        """Configure the data loaders for training and testing.
+
+        Args:
+            disable_train_data: Whether to disable training data loading
+        """
         config_train, config_test = (
             self.config["data"]["train"],
             self.config["data"]["test"],
@@ -66,7 +100,17 @@ class LEHDTrainer(Solver):
                 key: iter(loader) for key, loader in self.test_loader.items()
             }
 
-    def get_dataloader(self, config):
+    def get_dataloader(
+        self, config: Dict[str, Any]
+    ) -> Union[DataLoader, Dict[str, DataLoader]]:
+        """Get the dataloader for the given config.
+
+        Args:
+            config: Configuration dictionary containing dataloader parameters
+
+        Returns:
+            Either a single DataLoader for training or a dictionary of DataLoaders for testing
+        """
         # Override to use custom batch sampler
         dataset, collate_fn = self.get_dataset(config)
 
@@ -79,7 +123,7 @@ class LEHDTrainer(Solver):
             for size, sub_dataset in dataset.datasets.items():
                 dataset_size = len(sub_dataset)
                 problem_size = sub_dataset.raw_data_problems.shape[1] - 1
-                batch_sampler = LEHDBatchSampler(
+                batch_sampler = GEHDBatchSampler(
                     dataset_size,
                     problem_size,
                     params["batch_size"],
@@ -87,7 +131,7 @@ class LEHDTrainer(Solver):
                 )
 
                 # Wrap it with the infinite sampler
-                infinite_batch_sampler = InfiniteLEHDBatchSampler(batch_sampler)
+                infinite_batch_sampler = InfiniteGEHDBatchSampler(batch_sampler)
 
                 # Create and return dataloader
                 data_loader = DataLoader(
@@ -105,7 +149,7 @@ class LEHDTrainer(Solver):
             # Create batch sampler
             dataset_size = len(dataset)
             problem_size = dataset.raw_data_problems.shape[1] - 1
-            batch_sampler = LEHDBatchSampler(
+            batch_sampler = GEHDBatchSampler(
                 dataset_size,
                 problem_size,
                 params["batch_size"],
@@ -113,7 +157,7 @@ class LEHDTrainer(Solver):
             )
 
             # Wrap it with the infinite sampler
-            infinite_batch_sampler = InfiniteLEHDBatchSampler(batch_sampler)
+            infinite_batch_sampler = InfiniteGEHDBatchSampler(batch_sampler)
 
             # Create and return dataloader
             data_loader = DataLoader(
@@ -126,8 +170,8 @@ class LEHDTrainer(Solver):
             )
             return data_loader
 
-    def config_mesh(self):
-        """Load the mesh data to get node coordinates"""
+    def config_mesh(self) -> None:
+        """Load the mesh data to get node coordinates."""
         with h5py.File(self.mesh_params["mesh_path"], "r") as hf:
             # Load mesh data
             self.vertices = torch.tensor(hf["vertices"][:], requires_grad=False)
@@ -141,6 +185,9 @@ class LEHDTrainer(Solver):
         logging.info(f"Loaded mesh data with {len(self.city)} city points")
 
     def train(self):
+        """
+        Train the GEHD model.
+        """
         self.manual_seed()
         self.config_mesh()
         self.config_model()
@@ -185,6 +232,9 @@ class LEHDTrainer(Solver):
                 logger.info("Saved checkpoint to %s" % self.ckpt_dir)
 
     def test(self):
+        """
+        Test the GEHD model.
+        """
         self.manual_seed()
         self.config_mesh()
         self.config_model()
@@ -194,6 +244,9 @@ class LEHDTrainer(Solver):
         self.test_epoch(epoch=0)
 
     def visualize(self):
+        """
+        Visualize the GEHD model.
+        """
         self.manual_seed()
         self.config_mesh()
         self.config_model()
@@ -201,7 +254,10 @@ class LEHDTrainer(Solver):
         self.config_dataloader(disable_train_data=True)
         self.load_checkpoint()
 
-    def train_epoch(self, epoch):
+    def train_epoch(self, epoch: int) -> None:
+        """
+        Train the GEHD model for one epoch.
+        """
         self.model.train()
 
         tick = time.time()
@@ -278,7 +334,10 @@ class LEHDTrainer(Solver):
             )
         )
 
-    def test_epoch(self, epoch):
+    def test_epoch(self, epoch: int) -> None:
+        """
+        Test the GEHD model for one epoch.
+        """
         self.model.eval()
 
         for key in self.test_loader.keys():
@@ -359,7 +418,20 @@ class LEHDTrainer(Solver):
                 log_data = test_tracker.average()
                 wandb.log(log_data, step=self.global_step)
 
-    def train_step(self, batch):
+    def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Train the GEHD model for one step.
+
+        Args:
+            batch: Dictionary containing the batch data with keys:
+                - solutions: Tensor of shape [batch_size, num_nodes, num_features]
+                - capacities: Tensor of shape [batch_size]
+
+        Returns:
+            Dictionary containing the loss values:
+                - train/loss: Main routing loss
+                - train/feasibility_loss: Feasibility constraint loss
+                - train/combined_loss: Combined weighted loss
+        """
         # Extract data from batch
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
@@ -396,8 +468,6 @@ class LEHDTrainer(Solver):
             log_probs = F.log_softmax(logits, dim=1)
             loss = F.kl_div(log_probs, indices_teacher, reduction="batchmean")
 
-            # loss = F.binary_cross_entropy_with_logits(logits, indices_teacher)
-
             # Feasibility loss - create binary labels based on capacity constraints
             remaining_capacity = solutions[:, 0, 3]
             demands = solutions[:, 1:-1, 2]
@@ -407,7 +477,7 @@ class LEHDTrainer(Solver):
             )
 
             # Combined loss with weighting
-            combined_loss = loss + feasibility_loss  # You can adjust the weight
+            combined_loss = loss + feasibility_loss
 
             # Backpropagate and update model
             self.model.zero_grad()
@@ -448,7 +518,33 @@ class LEHDTrainer(Solver):
             "train/combined_loss": loss_mean + 0.5 * feasibility_loss_mean,
         }
 
-    def test_step(self, batch, key=None, eval=False):
+    def test_step(
+        self,
+        batch: Dict[str, torch.Tensor],
+        key: Optional[str] = None,
+        eval: bool = False,
+    ) -> Dict[str, Union[torch.Tensor, Dict[str, torch.Tensor]]]:
+        """Test the GEHD model for one step.
+
+        Args:
+            batch: Dictionary containing the batch data with keys:
+                - solutions: Tensor of shape [batch_size, num_nodes, num_features]
+                - capacities: Tensor of shape [batch_size]
+                - costs: Tensor of shape [batch_size]
+            key: Optional key for the test loader
+            eval: Whether this is an evaluation step
+
+        Returns:
+            Dictionary containing test metrics and optionally solution details if eval=True:
+                - test/{key}/optimal_score: Optimal solution score
+                - test/{key}/student_score: Model's solution score
+                - test/{key}/gap_percentage: Gap between optimal and model solutions
+                - test/{key}/optimal_solution/nodes: Optimal solution nodes (if eval=True)
+                - test/{key}/optimal_solution/flags: Optimal solution flags (if eval=True)
+                - test/{key}/student_solution/nodes: Model's solution nodes (if eval=True)
+                - test/{key}/student_solution/flags: Model's solution flags (if eval=True)
+                - test/{key}/depots: Depot nodes (if eval=True)
+        """
         # Extract data from batch
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
@@ -464,6 +560,7 @@ class LEHDTrainer(Solver):
         selected_student_flag = torch.empty(
             (solutions.size(0), 0), device=solutions.device, dtype=torch.int64
         )
+
         # Training loop for constructing solution
         first_step = True
         while (
@@ -473,16 +570,6 @@ class LEHDTrainer(Solver):
                 solutions,
                 capacities,
             )
-
-            # Properly masking the logits --> works verse for larger instances
-            # if not first_step:
-            #     remaining_capacity = solutions[:, 0, 3]
-            #     demands = solutions[:, 1:-1, 2]
-            #     feasibility_labels = demands <= remaining_capacity.unsqueeze(1)
-            #     logits[:, : solutions.size(1) - 2][~feasibility_labels] = -float("inf")
-            # else:
-            #     logits[:, : solutions.size(1) - 2] = -float("inf")
-            #     first_step = False
 
             indices = logits.argmax(dim=1)
 
@@ -507,9 +594,6 @@ class LEHDTrainer(Solver):
 
             # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
             smaller_ = solutions[:, 0, 3] < selected_demands
-
-            # assert smaller_.sum().item() == 0, "Capacity smaller than demand"
-
             solutions[smaller_, :, 3] = capacities[smaller_, None]
             flag_student[smaller_] = 1
 
@@ -555,12 +639,8 @@ class LEHDTrainer(Solver):
 
         # Calculate optimal and student scores
         optimal_length = self.get_travel_distance(
-            solutions_orig[:, 1:-1, 0]
-            .clone()
-            .to(torch.int64),  # exclude depot from the solution vector
-            solutions_orig[:, 1:-1, 4]
-            .clone()
-            .to(torch.int64),  # exclude depot from the solution vector
+            solutions_orig[:, 1:-1, 0].clone().to(torch.int64),
+            solutions_orig[:, 1:-1, 4].clone().to(torch.int64),
             depots,
         )
         current_best_length = self.get_travel_distance(
@@ -569,10 +649,9 @@ class LEHDTrainer(Solver):
             depots,
         )
 
-        # assert (optimal_length - costs).mean() < 1e-1, "Optimal length mismatch"
-
         # Calculate gap as percentage
         gap = 100 * ((current_best_length - optimal_length) / optimal_length).mean()
+
         if not eval:
             return {
                 f"test/{key}/optimal_score": optimal_length.mean(),
@@ -591,9 +670,19 @@ class LEHDTrainer(Solver):
                 f"test/{key}/depots": depots,
             }
 
-    def get_travel_distance(self, order_node, order_flag, depots):
-        # order_node: [B,V]
-        # order_flag: [B,V]
+    def get_travel_distance(
+        self, order_node: torch.Tensor, order_flag: torch.Tensor, depots: torch.Tensor
+    ) -> torch.Tensor:
+        """Get the travel distance for the given order and flag.
+
+        Args:
+            order_node: Tensor of shape [batch_size, num_nodes] containing node indices
+            order_flag: Tensor of shape [batch_size, num_nodes] containing route flags
+            depots: Tensor of shape [batch_size, 1] containing depot indices
+
+        Returns:
+            Tensor of shape [batch_size] containing the total travel distance for each route
+        """
         order_node_ = order_node.clone()
         order_flag_ = order_flag.clone()
 
@@ -623,7 +712,16 @@ class LEHDTrainer(Solver):
 
         return length
 
-    def visualize_single_solution(self, nodes, flags, depot):
+    def visualize_single_solution(
+        self, nodes: torch.Tensor, flags: torch.Tensor, depot: torch.Tensor
+    ) -> None:
+        """Visualize a single solution on the mesh.
+
+        Args:
+            nodes: Tensor of shape [num_nodes] containing the node indices in the solution
+            flags: Tensor of shape [num_nodes] containing the route flags (1 for depot return, 0 otherwise)
+            depot: Tensor of shape [1] containing the depot node index
+        """
         node_sequence = []
         for flag, node in zip(flags, nodes):
             if flag.item() == 1:
@@ -691,7 +789,7 @@ class LEHDTrainer(Solver):
         node_colors = []
         for node_idx, node in enumerate(all_nodes):
             if node == depot_index:
-                node_colors.append([0.0, 0.0, 0.0])  # Red for depot
+                node_colors.append([0.0, 0.0, 0.0])  # Black for depot
             else:
                 # Fetch route color, default to gray if not found
                 route_color = node_to_route_color.get(node, [0.5, 0.5, 0.5])
@@ -699,15 +797,29 @@ class LEHDTrainer(Solver):
         node_colors = np.array(node_colors)
 
         ps_nodes = ps.register_point_cloud(
-            "Nodes", node_coords, radius=0.01, enabled=True  # << SMALLER NODES!
+            "Nodes", node_coords, radius=0.01, enabled=True
         )
         ps_nodes.add_color_quantity("Route color", node_colors, enabled=True)
 
         ps.set_ground_plane_mode("none")
         ps.show()
 
-    def _get_geodesic_path(self, geoalg, src_idx, dst_idx):
-        """Calculate geodesic distance between two nodes using pygeodesic"""
+    def _get_geodesic_path(
+        self,
+        geoalg: pygeodesic.geodesic.PyGeodesicAlgorithmExact,
+        src_idx: int,
+        dst_idx: int,
+    ) -> Optional[np.ndarray]:
+        """Calculate geodesic path between two nodes using pygeodesic.
+
+        Args:
+            geoalg: The geodesic algorithm instance
+            src_idx: Source node index
+            dst_idx: Destination node index
+
+        Returns:
+            Optional[np.ndarray]: Array of shape (N, 3) containing the path points, or None if path calculation fails
+        """
         source_indices = np.array([src_idx], dtype=np.int32)
         target_indices = np.array([dst_idx], dtype=np.int32)
 
@@ -715,11 +827,18 @@ class LEHDTrainer(Solver):
         _, path = geoalg.geodesicDistance(target_indices, source_indices)
         return path
 
-    def visualize_geodesic_path(self, geodesic_path, route_color, route_idx):
+    def visualize_geodesic_path(
+        self,
+        geodesic_path: np.ndarray,
+        route_color: Tuple[float, float, float],
+        route_idx: int,
+    ) -> None:
         """Visualizes a geodesic path on a mesh using Polyscope.
+
         Args:
-            geodesic_path (np.array): A numpy array of shape (N, 3) representing the 3D coordinates of the geodesic path.
-            route_color (tuple): A tuple of three floats representing the RGB color of the route (e.g., (1, 0, 0) for red).
+            geodesic_path: Array of shape (N, 3) representing the 3D coordinates of the geodesic path
+            route_color: Tuple of three floats representing the RGB color of the route (e.g., (1, 0, 0) for red)
+            route_idx: Index of the route for labeling
         """
         if geodesic_path is None or len(geodesic_path) < 2:
             print("Cannot visualize: Invalid or empty geodesic path.")
@@ -734,7 +853,12 @@ class LEHDTrainer(Solver):
             radius=0.005,
         )
 
-    def visualize_solutions(self, keys=None):
+    def visualize_solutions(self, keys: Optional[List[str]] = None) -> None:
+        """Visualize the solutions for the given instances.
+
+        Args:
+            keys: Optional list of keys to visualize. If None, visualizes all test instances.
+        """
         self.model.eval()
 
         keys = keys if keys is not None else self.test_loader.keys()

@@ -1,9 +1,16 @@
+"""
+This file contains the dataloader for the decoder. Part of the code is adapted from the LEHD paper
+titled "Neural Combinatorial Optimization with Heavy Decoder: Toward Large Scale Generalization" by Fu Luo et al (https://openreview.net/forum?id=RBI4oAbdpm).
+Their GitHub repository can be found at https://github.com/CIAM-Group/NCO_code/tree/main/single_objective/LEHD.
+"""
+
 import torch
 import h5py
 from torch.utils.data import Dataset
 import numpy as np
 from tqdm import tqdm
 import logging
+from typing import List, Tuple, Dict, Union, Optional, Any, Generator, Iterator
 
 import multiprocessing as mp
 from functools import partial
@@ -11,7 +18,9 @@ from functools import partial
 logger = logging.getLogger(__name__)
 
 
-def process_problem(hf_path, i):
+def process_problem(
+    hf_path: str, i: int
+) -> Tuple[List[float], int, List[float], float, List[List[int]]]:
     """Top-level function to process a single problem."""
     with h5py.File(hf_path, "r") as hf:
         problem = hf["problems"][i]
@@ -22,16 +31,20 @@ def process_problem(hf_path, i):
     return problem.tolist(), int(capacity), demand.tolist(), float(distance), node_flag
 
 
-# TODO: Take this from utils
-def tow_col_nodeflag(node_flag):
+def tow_col_nodeflag(node_flag: np.ndarray) -> List[List[int]]:
     """Convert one-row node_flag to two-column format."""
     V = int(len(node_flag) / 2)
     return [[int(node_flag[i]), int(node_flag[V + i])] for i in range(V)]
 
 
-def reformat_solution(solution, problem):
+def reformat_solution(solution: torch.Tensor, problem: torch.Tensor) -> torch.Tensor:
     """
     Adapts the batch processing for no batching (single sample).
+    Args:
+        solution: The solution to be reformatted.
+        problem: The problem to be reformatted.
+    Returns:
+        The reformatted solution.
     """
 
     # extend the solution array with 0s on the first place
@@ -60,43 +73,54 @@ def reformat_solution(solution, problem):
     return solution_extended
 
 
-class MultiInstanceLEHDDataset(Dataset):
+class MultiInstanceGEHDDataset(Dataset):
     """Wrapper dataset that handles multiple instance sizes"""
 
-    def __init__(self, data_paths, mode="test", episodes=-1, sub_path=False):
+    def __init__(
+        self,
+        data_paths: Dict[int, str],
+        mode: str = "test",
+        episodes: int = -1,
+        distort: bool = False,
+    ) -> None:
         self.datasets = {
-            size: LEHDDataset(path, mode, episodes, sub_path)
+            size: GEHDDataset(path, mode, episodes, distort)
             for size, path in data_paths.items()
         }
         self.instance_sizes = list(data_paths.keys())
         self.current_size = None  # Track current active size
 
-    def set_size(self, size):
+    def set_size(self, size: int) -> None:
         """Switch active instance size"""
         if size not in self.datasets:
             raise ValueError(f"Invalid instance size {size}")
         self.current_size = size
         self.active_dataset = self.datasets[size]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.active_dataset) if self.current_size else 0
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         return self.active_dataset[idx]
 
-    def get_all_sizes(self):
+    def get_all_sizes(self) -> List[int]:
         return self.instance_sizes
 
 
-class LEHDBatchSampler(torch.utils.data.Sampler):
+class GEHDBatchSampler(torch.utils.data.Sampler):
     """
     BatchSampler that groups items into batches where each batch uses a fixed subpath length.
     This ensures all items in a batch have the same sequence length.
     """
 
     def __init__(
-        self, dataset_size, problem_size, batch_size, shuffle, drop_last=False
-    ):
+        self,
+        dataset_size: int,
+        problem_size: int,
+        batch_size: int,
+        shuffle: bool,
+        drop_last: bool = False,
+    ) -> None:
         self.dataset_size = dataset_size
         self.problem_size = problem_size
         self.batch_size = batch_size
@@ -106,10 +130,10 @@ class LEHDBatchSampler(torch.utils.data.Sampler):
             self.num_batches += 1
         self.shuffle = shuffle
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_batches
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[List[Tuple[int, int]]]:
         # Create random indices
         if self.shuffle:
             indices = torch.randperm(self.dataset_size).tolist()
@@ -120,55 +144,79 @@ class LEHDBatchSampler(torch.utils.data.Sampler):
         for i in range(0, self.dataset_size, self.batch_size):
             batch_indices = indices[i : min(i + self.batch_size, self.dataset_size)]
 
-            # TODO: What is this doing?
             if self.drop_last and len(batch_indices) < self.batch_size:
                 continue
 
-            fixed_length = torch.randint(low=4, high=self.problem_size + 1, size=[1])[0]
-            batch_indices = [(x, fixed_length.item()) for x in batch_indices]
+            # fixed_length = torch.randint(low=4, high=self.problem_size + 1, size=[1])[0]
+            # batch_indices = [(x, fixed_length.item()) for x in batch_indices]
+            batch_indices = [(x, 0) for x in batch_indices]  # don't cut solutions
+
             yield batch_indices
 
 
-class InfiniteLEHDBatchSampler:
-    def __init__(self, batch_sampler):
+class InfiniteGEHDBatchSampler:
+    """
+    InfiniteBatchSampler that groups items into batches where each batch uses a fixed subpath length.
+    This ensures all items in a batch have the same sequence length.
+    """
+
+    def __init__(self, batch_sampler: GEHDBatchSampler) -> None:
         self.batch_sampler = batch_sampler
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[List[Tuple[int, int]]]:
         while True:
             # Create a fresh iterator from the batch sampler each time
             batch_iter = iter(self.batch_sampler)
             for batch in batch_iter:
                 yield batch
 
-    def __len__(self):
+    def __len__(self) -> int:
         # Return the length of the underlying batch sampler
         return len(self.batch_sampler)
 
 
-class LEHDDataset(Dataset):
-    def __init__(self, data_path, mode="train", episodes=100, sub_path=False):
+class GEHDDataset(Dataset):
+    """
+    Dataset class for the GEHD problem. Parts of the class are adapted from the LEHD paper.
+    """
+
+    def __init__(
+        self,
+        data_path: str,
+        mode: str = "train",
+        episodes: int = 100,
+        distort: bool = False,
+    ) -> None:
+        """
+        Initialize the GEHDDataset.
+        Args:
+            data_path: The path to the data file.
+            mode: The mode of the dataset.
+            episodes: The number of episodes to load.
+            distort: Whether to use path distortion.
+        """
         self.data_path = data_path
         self.mode = mode
         self.episodes = episodes
-        self.sub_path = sub_path
+        self.distort = distort
 
         # Load the raw data
         self.load_raw_data(self.episodes)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.raw_data_problems)
 
-    def __getitem__(self, args):
+    def __getitem__(self, idx: Union[int, Tuple[int, int]]) -> Dict[str, torch.Tensor]:
         # Get a single problem instance
-        idx = args[0]
-        fixed_length = args[1]
+        if isinstance(idx, int):
+            idx = (idx, 0)  # Default fixed_length if not provided
+        idx, fixed_length = idx
 
         # Get problem indices
         problems = self.raw_data_problems[idx]
         capacity = self.raw_data_capacity[idx]
         demand = self.raw_data_demand[idx]
         solution = self.raw_data_node_flag[idx]
-
         cost = self.raw_data_cost[idx]
 
         # Create the problem representation
@@ -184,8 +232,8 @@ class LEHDDataset(Dataset):
         )
 
         # Apply subpath sampling if needed, using the provided fixed_length
-        if self.sub_path:
-            problem, solution = self.sampling_subpaths(problem, solution)
+        if self.distort:
+            problem, solution = self.sampling_subpaths(problem, solution, fixed_length)
 
         solution = reformat_solution(solution, problem)
 
@@ -195,7 +243,7 @@ class LEHDDataset(Dataset):
             "cost": cost,
         }
 
-    def load_raw_data(self, episode=1000000):
+    def load_raw_data(self, episode: int = 1000000) -> None:
         logging.info(f"Start loading {self.mode} dataset from HDF5 file...")
 
         assert self.data_path.endswith(".h5"), "Data file must be in HDF5 format"
@@ -246,7 +294,7 @@ class LEHDDataset(Dataset):
             f"Loading {self.mode} dataset done! Loaded {len(self.raw_data_capacity)} problems."
         )
 
-    def shuffle_data(self):
+    def shuffle_data(self) -> None:
         # Shuffle the training set data
         index = torch.randperm(len(self.raw_data_problems)).long()
         self.raw_data_problems = self.raw_data_problems[index]
@@ -255,7 +303,9 @@ class LEHDDataset(Dataset):
         self.raw_data_cost = self.raw_data_cost[index]
         self.raw_data_node_flag = self.raw_data_node_flag[index]
 
-    def vrp_whole_and_solution_subrandom_inverse(self, solution):
+    def vrp_whole_and_solution_subrandom_inverse(
+        self, solution: torch.Tensor
+    ) -> torch.Tensor:
         clockwise_or_not = torch.rand(1)[0]
 
         if clockwise_or_not >= 0.5:
@@ -328,7 +378,9 @@ class LEHDDataset(Dataset):
 
         return solution_flip
 
-    def vrp_whole_and_solution_subrandom_shift_V2inverse(self, solution):
+    def vrp_whole_and_solution_subrandom_shift_V2inverse(
+        self, solution: torch.Tensor
+    ) -> torch.Tensor:
         """
         For each instance, shift randomly so that different end_with depot nodes can reach the last digit.
         """
@@ -369,7 +421,12 @@ class LEHDDataset(Dataset):
 
         return solution
 
-    def sampling_subpaths(self, problem, solution, fixed_length=None):
+    def sampling_subpaths(
+        self,
+        problem: torch.Tensor,
+        solution: torch.Tensor,
+        fixed_length: Optional[int] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         # problem shape (V+1,4)
         # solution shape (V,2)
 
@@ -378,7 +435,7 @@ class LEHDDataset(Dataset):
         embedding_size = problem.shape[1]
 
         # Use fixed length if provided, otherwise random
-        if fixed_length is not None:
+        if fixed_length is not None and fixed_length > 0:
             length_of_subpath = fixed_length
         else:
             # Random length of subpath between 4 and problem size
@@ -460,7 +517,7 @@ class LEHDDataset(Dataset):
         return new_data, sub_tour
 
 
-def collate_batch(batch):
+def collate_batch(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
     solutions = torch.stack([item["solution"] for item in batch])
     capacities = torch.stack([item["capacity"] for item in batch])
     costs = torch.stack([item["cost"] for item in batch])
@@ -474,21 +531,23 @@ def collate_batch(batch):
     return batch_dict
 
 
-def get_dataset(config):
+def get_dataset(
+    config: Dict[str, Any],
+) -> Tuple[Union[GEHDDataset, MultiInstanceGEHDDataset], Any]:
     # Create dataset
     if config["mode"] == "train":
-        dataset = LEHDDataset(
+        dataset = GEHDDataset(
             data_path=config["env"]["data_path"],
             episodes=config["episodes"],
             mode=config["mode"],
-            sub_path=config["env"]["sub_path"],
+            distort=config["env"]["distort"],
         )
     elif config["mode"] == "test":
-        dataset = MultiInstanceLEHDDataset(
+        dataset = MultiInstanceGEHDDataset(
             data_paths=config["env"]["data_path"],
             episodes=config["episodes"],
             mode=config["mode"],
-            sub_path=config["env"]["sub_path"],
+            distort=config["env"]["distort"],
         )
     else:
         raise ValueError(f"Invalid mode: {config['mode']}. Must be 'train' or 'test'.")

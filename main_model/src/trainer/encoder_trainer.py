@@ -1,3 +1,9 @@
+"""
+This file contains the GeGnnTrainer class, which is a subclass of the Solver class.
+The code is adapted from the GeGnn paper titled "Learning the Geodesic Embedding with Graph Neural Networks" by Pang Bo et al (https://doi.org/10.1145/3618317).
+Their GitHub repository can be found at https://github.com/IntelligentGeometry/GeGnn.
+"""
+
 import torch
 import logging
 

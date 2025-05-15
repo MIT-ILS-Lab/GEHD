@@ -1,0 +1,24 @@
+# Paths
+paths:
+  output_dir: <Path to the directory where the problem data will be saved>
+  mesh_path: <Path to the mesh file>
+  mesh_filename: <Filename for the mesh data>
+
+# Problem generation parameters
+problem_generation:
+  num_customers: <Number of customers to sample from mesh>
+  train:
+    problem_size: <Size of training problems>
+    num_problems: <Number of training problems to generate>
+    filename_template: <Template for training data filenames>
+  test:
+    problem_sizes: <List of test problem sizes>
+    num_problems: <List of number of problems per size>
+    filename_template: <Template for test data filenames>
+  demand:
+    lower: <Lower bound for customer demand>
+    upper: <Upper bound for customer demand>
+  capacity:
+    lower: <Lower bound for vehicle capacity>
+    upper: <Upper bound for vehicle capacity>
+  max_runtime: <Maximum runtime in seconds for HGS solver>

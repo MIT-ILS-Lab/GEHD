@@ -1,3 +1,9 @@
+"""
+This file contains the dataloader for the encoder. Part of the code is adapted from the GeGnn paper.
+The code is adapted from the GeGnn paper titled "Learning the Geodesic Embedding with Graph Neural Networks" by Pang Bo et al (https://doi.org/10.1145/3618317).
+Their GitHub repository can be found at https://github.com/IntelligentGeometry/GeGnn.
+"""
+
 import os
 import torch
 import numpy as np
@@ -16,6 +22,7 @@ def read_file(filename):
 
 
 class Dataset(torch.utils.data.Dataset):
+
     def __init__(
         self,
         root,

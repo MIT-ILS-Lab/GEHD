@@ -1,20 +1,19 @@
+"""
+This file is used to run the main training script.
+"""
+
 import logging
 import yaml
 import torch
 
 from main_model.src.utils.config import load_config, parse_args
 from main_model.src.trainer.encoder_trainer import GeGnnTrainer
-from main_model.src.trainer.decoder_trainer import LEHDTrainer
+from main_model.src.trainer.decoder_trainer import GEHDTrainer
 
 torch.backends.cudnn.benchmark = True
 
 # Set the type of model to run, either "encoder" or "decoder"
 TYPE = "decoder"
-
-
-####################################################################################################
-##### Main ########################################################################################
-####################################################################################################
 
 # Configure the logger
 logging.basicConfig(
@@ -27,11 +26,15 @@ logging.basicConfig(
 )
 
 # Define the models
-models = {"encoder": GeGnnTrainer, "decoder": LEHDTrainer}
+models = {"encoder": GeGnnTrainer, "decoder": GEHDTrainer}
 paths = {
     "encoder": "main_model/configs/config_encoder.yaml",
     "decoder": "main_model/configs/config_decoder.yaml",
 }
+
+####################################################################################################
+##### Main ########################################################################################
+####################################################################################################
 
 if __name__ == "__main__":
     assert (

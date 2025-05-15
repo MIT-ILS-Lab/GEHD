@@ -1,60 +1,85 @@
 solver:
   run: train
-  logdir: main_model/logs/decoder_100_long_rev
+
+  # logging and processing
+  logdir: <Path to the log directory>
   max_epoch: 200
   test_every_epoch: 1
   save_every_epoch: 5
   log_per_iter: 1
+
+  # optimizer
   type: adamw
-  weight_decay: 0.01
+  weight_decay: 0.01  # default value of adamw
   lr: 0.0001
+
+  # learning rate
   lr_type: poly
   lr_power: 0.9
+
+  # gradient accumulation
   accumulation_steps: 1
-  progress_bar: true
-  rand_seed: 22
-  empty_cache: true
-  ckpt: null
-  # ckpt: main_model/logs/decoder_100_long_2/checkpoints/00200.solver.tar
-  clip_grad: 0.0
+
+  # others
+  progress_bar: True
+  rand_seed: -1 # fix the random seed if bigger than 0
+  empty_cache: True # empty the cache periodically
+  ckpt: null # Path to the decoder checkpoint file (none ornull means no checkpoint)
+  # ckpt: <Path to the checkpoint file> # Used for visualization or resumed training
+  clip_grad: -1.0  # clip gradient norm (-1: disable)
+
+  # wandb
   wandb:
-    project_name: decoder_100
-    run_name: base_long_rev
+    project_name: <Name of the wandb project>
+    run_name: <Name of the wandb run>
+
 data:
   mesh:
-    mesh_path: main_model/disk/problems/set_100/mesh_data.h5
+    mesh_path: <Path to the .h5 mesh data for the problems>
   train:
+    # data loading
     mode: train
     batch_size: 256
     num_workers: 4
-    episodes: -1
+    episodes: -1 # number of episodes to use for each epoch (-1: all)
     shuffle: true
+
+    # data path
     env:
-      data_path: main_model/disk/problems/set_100/cvrp_data_train_100.h5
-      sub_path: true
-    disable: false
+      data_path: <Path to the training data for the problems>
+      distort: true # whether to use path distortion during training
+    disable: false # whether to disable the training dataset
   test:
+    # data loading
     mode: test
     batch_size: 64
     num_workers: 4
-    episodes: -1
+    episodes: -1 # number of episodes to use for each epoch (-1: all)
     shuffle: true
+
+    # data path
     env:
-      data_path:
-        100: main_model/disk/problems/set_100/cvrp_data_test_100.h5
-        200: main_model/disk/problems/set_100/cvrp_data_test_200.h5
-        500: main_model/disk/problems/set_100/cvrp_data_test_500.h5
-        1000: main_model/disk/problems/set_100/cvrp_data_test_1000.h5
-      sub_path: false
-    disable: false
+      data_path: # paths to the testing data for different problem sizes
+        <size>: <Path to the test data for size <size>>
+        # Example:
+        # 100: <Path to the test data for size 100>
+        # 200: <Path to the test data for size 200>
+        # 500: <Path to the test data for size 500>
+        # 1000: <Path to the test data for size 1000>
+      distort: false # whether to use path distortion during testing
+    disable: false # whether to disable the testing dataset
+
 model:
-  embedding_dim: 128
-  decoder_layer_num: 6
-  head_num: 8
-  hidden_dim: 512
+  # decoder architecture
+  embedding_dim: 128 # dimension of the embedding
+  decoder_layer_num: 6 # number of layers in the decoder
+  head_num: 8 # number of heads in the decoder
+  hidden_dim: 512 # dimension of the hidden layer in the decoder
+
+  # pretrained encoder
   pretrained_encoder:
-    in_channels: 6
-    hidden_channels: 256
-    out_channels: 32
-    ckp_path: main_model/logs/encoder_32/checkpoints/08000.solver.tar
-    mesh_path: main_model/disk/meshes/sphere.obj
+    in_channels: 6 # input dimension of each vertices
+    hidden_channels: 256 # hidden dimensions of the vertices
+    out_channels: 32 # the final embedding dimension of each vertices
+    ckp_path: <Path to the pretrained encoder checkpoint .tar file> # path to the pretrained encoder checkpoint
+    mesh_path: <Path to the pretrained encoder mesh .obj file> # path to the pretrained encoder mesh

@@ -1,19 +1,26 @@
+"""
+This file contains the code to generate the problem data for a fixed depot locationfor the decoder.
+"""
+
 import os
 import time
-import multiprocessing
 from functools import partial
-import h5py
+from pathlib import Path
+from typing import Dict, Any, Tuple
 import logging
-import numpy as np
-from tqdm import tqdm
-import trimesh
 import multiprocessing as mp
 
+import h5py
+import numpy as np
+import trimesh
+import yaml
+from tqdm import tqdm
 from pygeodesic import geodesic
 from pyvrp import Model
 from pyvrp.stop import MaxRuntime
 
 from main_model.src.utils.general_utils import parse_pyvrp_solution
+from main_model.src.utils.config import load_config, parse_args
 
 # Configure the logging
 logging.basicConfig(
@@ -29,7 +36,9 @@ _geoalg = None
 _source_indices = None
 
 
-def init_worker(vertices, faces, source_indices):
+def init_worker(
+    vertices: np.ndarray, faces: np.ndarray, source_indices: np.ndarray
+) -> None:
     """Initialize the worker process with the geodesic algorithm."""
     global _geoalg, _source_indices
     from pygeodesic import (
@@ -40,7 +49,7 @@ def init_worker(vertices, faces, source_indices):
     _source_indices = source_indices
 
 
-def worker_function(i):
+def worker_function(i: int) -> Tuple[int, np.ndarray]:
     """Worker function that uses the pre-initialized geodesic algorithm."""
     global _geoalg, _source_indices
     index_arr = np.array([_source_indices[i]])
@@ -49,8 +58,11 @@ def worker_function(i):
 
 
 def compute_geodesic_distances_parallel(
-    vertices, faces, source_indices, num_processes=None
-):
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    source_indices: np.ndarray,
+    num_processes: int | None = None,
+) -> np.ndarray:
     """Compute geodesic distances using parallel processing."""
     # Set default number of processes
     if num_processes is None:
@@ -89,7 +101,7 @@ def compute_geodesic_distances_parallel(
     return geodesic_mat
 
 
-def transform_solution(solution):
+def transform_solution(solution: np.ndarray) -> np.ndarray:
     """
     Converts a one-row solution format to a two-row format with nodes and flags.
 
@@ -112,7 +124,9 @@ def transform_solution(solution):
     return node_flag
 
 
-def get_mesh_city(mesh_path: str, num_customers: int, seed: int = 0):
+def get_mesh_city(
+    mesh_path: str, num_customers: int, seed: int = 0
+) -> Tuple[dict, int]:
     """
     Generates a city for the CVRP with a single fixed depot on a trimesh.
 
@@ -298,7 +312,7 @@ def get_solution(mesh_city: dict, problem: dict, max_runtime: int) -> dict:
     return res_dict
 
 
-def generate_and_solve_mesh_problem(args):
+def generate_and_solve_mesh_problem(args: tuple) -> dict:
     (
         mesh_city,
         city_size,
@@ -413,7 +427,7 @@ def produce_problem_instances(
 
 
 def access_mesh_cvrp_data(
-    problem_file: str, mesh_file: str = None, problem_index: int = 0
+    problem_file: str, mesh_file: str | None = None, problem_index: int = 0
 ) -> dict:
     """
     Accesses mesh-based CVRP problem-solution data from HDF5 files.
@@ -444,62 +458,81 @@ def access_mesh_cvrp_data(
 
 
 if __name__ == "__main__":
-    # Define a common output directory for all data
-    output_dir = "main_model/disk/problems/set_100"
-    os.makedirs(output_dir, exist_ok=True)
+    # Load the config file
+    args = parse_args("main_model/configs/config_problem_generation.yaml")
+    config = load_config(args.config)
 
-    # Mesh parameters
-    mesh_path = "main_model/disk/meshes/sphere.obj"
-    mesh_filename = "mesh_data.h5"
-    # num_customers = 20
+    # Pretty-print the config using YAML formatting
+    logging.info(
+        f"Loaded configuration from {args.config}:\n{yaml.dump(config, default_flow_style=False, sort_keys=False)}"
+    )
 
-    # # Generate the mesh city once
-    # logging.info(f"Generating mesh city with {num_customers} customers...")
-    # mesh_city, city_size = get_mesh_city(mesh_path, num_customers)
+    # Create output directory
+    os.makedirs(config["paths"]["output_dir"], exist_ok=True)
 
-    # # Save mesh data separately
-    # save_mesh_data(mesh_city, output_dir, mesh_filename)
+    # Generate the mesh city once
+    logging.info(
+        f"Generating mesh city with {config['problem_generation']['num_customers']} customers..."
+    )
+    mesh_city, city_size = get_mesh_city(
+        config["paths"]["mesh_path"], config["problem_generation"]["num_customers"]
+    )
 
-    mesh_city, city_size = load_mesh_data(os.path.join(output_dir, mesh_filename))
+    # Save mesh data separately
+    save_mesh_data(
+        mesh_city, config["paths"]["output_dir"], config["paths"]["mesh_filename"]
+    )
 
-    # Training data parameters
-    # train_problem_size = 20
-    # num_problems_train = 1000
-    # train_filename = f"cvrp_data_train_{train_problem_size}.h5"
+    # Load mesh data
+    mesh_city, city_size = load_mesh_data(
+        os.path.join(config["paths"]["output_dir"], config["paths"]["mesh_filename"])
+    )
 
-    # # Generate training problems (similar to before)
-    # produce_problem_instances(
-    #     mesh_city=mesh_city,
-    #     city_size=city_size,
-    #     num_problems=num_problems_train,
-    #     problem_size=train_problem_size,
-    #     output_dir=output_dir,
-    #     filename=train_filename,
-    #     dmd_lower=1,
-    #     dmd_upper=9,
-    #     cap_lower=50,
-    #     cap_upper=50,
-    #     max_runtime=5,
-    # )
+    # Generate training problems
+    train_config = config["problem_generation"]["train"]
+    train_filename = train_config["filename_template"].format(
+        size=train_config["problem_size"]
+    )
 
-    # Test data parameters - now with multiple problem sizes
-    test_problem_sizes = [200, 500, 1000]  # List of different problem sizes
-    test_problem_nums = [100, 100, 100]  # Number of problems per size
+    logging.info(
+        f"Generating {train_config['num_problems']} training problems of size {train_config['problem_size']}"
+    )
+
+    produce_problem_instances(
+        mesh_city=mesh_city,
+        city_size=city_size,
+        num_problems=train_config["num_problems"],
+        problem_size=train_config["problem_size"],
+        output_dir=config["paths"]["output_dir"],
+        filename=train_filename,
+        dmd_lower=config["problem_generation"]["demand"]["lower"],
+        dmd_upper=config["problem_generation"]["demand"]["upper"],
+        cap_lower=config["problem_generation"]["capacity"]["lower"],
+        cap_upper=config["problem_generation"]["capacity"]["upper"],
+        max_runtime=config["problem_generation"]["max_runtime"],
+    )
 
     # Generate test problems for each size
-    for problem_size, problem_num in zip(test_problem_sizes, test_problem_nums):
-        test_filename = f"cvrp_data_test_{problem_size}.h5"
+    test_config = config["problem_generation"]["test"]
+    for problem_size, problem_num in zip(
+        test_config["problem_sizes"], test_config["num_problems"]
+    ):
+        test_filename = test_config["filename_template"].format(size=problem_size)
+
+        logging.info(f"Generating {problem_num} test problems of size {problem_size}")
 
         produce_problem_instances(
             mesh_city=mesh_city,
             city_size=city_size,
             num_problems=problem_num,
             problem_size=problem_size,
-            output_dir=output_dir,
+            output_dir=config["paths"]["output_dir"],
             filename=test_filename,
-            dmd_lower=1,
-            dmd_upper=9,
-            cap_lower=50,
-            cap_upper=50,
-            max_runtime=5,
+            dmd_lower=config["problem_generation"]["demand"]["lower"],
+            dmd_upper=config["problem_generation"]["demand"]["upper"],
+            cap_lower=config["problem_generation"]["capacity"]["lower"],
+            cap_upper=config["problem_generation"]["capacity"]["upper"],
+            max_runtime=config["problem_generation"]["max_runtime"],
         )
+
+        logging.info(f"Completed generating problems for size {problem_size}")
