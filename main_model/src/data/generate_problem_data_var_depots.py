@@ -430,7 +430,6 @@ if __name__ == "__main__":
 
     # Mesh parameters
     mesh_path = "main_model/disk/meshes/sphere.obj"
-    mesh_filename = "mesh_data.h5"
     num_customers = 20
 
     # Generate the mesh city once
@@ -443,6 +442,7 @@ if __name__ == "__main__":
     # Training data parameters
     train_problem_size = 20
     num_problems_train = 1000
+
     train_filename = f"cvrp_data_train_{train_problem_size}.h5"
 
     # Generate training problems (similar to before)

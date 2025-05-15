@@ -8,6 +8,7 @@ import trimesh
 import numpy as np
 import pygeodesic
 
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -200,19 +201,21 @@ class LEHDTrainer(Solver):
         self.config_dataloader(disable_train_data=True)
         self.load_checkpoint()
 
-        assert (
-            self.config["solver"]["ckpt"] is not None
-        ), "Checkpoint path in ckpt need to be provided."
-
     def train_epoch(self, epoch):
         self.model.train()
 
         tick = time.time()
         elapsed_time = dict()
 
+        epoch_size = (
+            min(self.trainer_params["epoch_size"], len(self.train_loader))
+            if self.trainer_params["epoch_size"] > 0
+            else len(self.train_loader)
+        )
+
         train_tracker_epoch = AverageTracker()
 
-        for episode in range(1, len(self.train_loader) + 1):
+        for episode in range(1, epoch_size + 1):
             train_tracker = AverageTracker()
 
             # load data
@@ -248,8 +251,8 @@ class LEHDTrainer(Solver):
                     "Epoch {:3d}: Train {:3d}/{:3d} ({:5.1f}%) Loss: {:.4f} Feasibility Loss: {:.4f} Combined: {:.4f} Time: {:.2f}".format(
                         epoch,
                         episode,
-                        len(self.train_loader),
-                        episode / len(self.train_loader) * 100,
+                        epoch_size,
+                        episode / epoch_size * 100,
                         output["train/loss"],
                         output["train/feasibility_loss"],
                         output["train/combined_loss"],
@@ -283,13 +286,17 @@ class LEHDTrainer(Solver):
             # log which key we are currently testing
             logger.info(f"*** Testing instance sice {key} ***")
 
+            epoch_size = (
+                min(self.testing_params["epoch_size"], len(self.test_loader[key]))
+                if self.testing_params["epoch_size"] > 0
+                else len(self.test_loader[key])
+            )
+
             test_tracker = AverageTracker()
             tick = time.time()  # Start time for batch timing
             elapsed_time = dict()
 
-            for episode in range(
-                1, len(self.test_loader[key]) + 1
-            ):  # Simple loop without tqdm
+            for episode in range(1, epoch_size + 1):  # Simple loop without tqdm
                 # Load data
                 batch = self.test_iter[key].__next__()
                 batch["iter_num"] = episode
@@ -323,8 +330,8 @@ class LEHDTrainer(Solver):
                         "Epoch {:3d}: Test {:3d}/{:3d} ({:5.1f}%) Gap: {:.4f} Time: {:.2f}".format(
                             epoch,
                             episode,
-                            len(self.test_loader),
-                            (episode) / len(self.test_loader) * 100,
+                            epoch_size,
+                            (episode) / epoch_size * 100,
                             output[f"test/{key}/gap_percentage"],
                             output[f"test/{key}/time/batch"].item() / 60,
                         )
@@ -441,7 +448,7 @@ class LEHDTrainer(Solver):
             "train/combined_loss": loss_mean + 0.5 * feasibility_loss_mean,
         }
 
-    def test_step(self, batch, key: None, eval: bool = False):
+    def test_step(self, batch, key=None, eval=False):
         # Extract data from batch
         solutions = batch["solutions"]
         capacities = batch["capacities"].float()
@@ -467,14 +474,15 @@ class LEHDTrainer(Solver):
                 capacities,
             )
 
-            if not first_step:
-                remaining_capacity = solutions[:, 0, 3]
-                demands = solutions[:, 1:-1, 2]
-                feasibility_labels = demands <= remaining_capacity.unsqueeze(1)
-                logits[:, : solutions.size(1) - 2][~feasibility_labels] = -float("inf")
-            else:
-                logits[:, : solutions.size(1) - 2] = -float("inf")
-                first_step = False
+            # Properly masking the logits --> works verse for larger instances
+            # if not first_step:
+            #     remaining_capacity = solutions[:, 0, 3]
+            #     demands = solutions[:, 1:-1, 2]
+            #     feasibility_labels = demands <= remaining_capacity.unsqueeze(1)
+            #     logits[:, : solutions.size(1) - 2][~feasibility_labels] = -float("inf")
+            # else:
+            #     logits[:, : solutions.size(1) - 2] = -float("inf")
+            #     first_step = False
 
             indices = logits.argmax(dim=1)
 
@@ -565,7 +573,6 @@ class LEHDTrainer(Solver):
 
         # Calculate gap as percentage
         gap = 100 * ((current_best_length - optimal_length) / optimal_length).mean()
-
         if not eval:
             return {
                 f"test/{key}/optimal_score": optimal_length.mean(),
@@ -644,8 +651,8 @@ class LEHDTrainer(Solver):
             "Solution Mesh",
             self.vertices.numpy(),
             self.faces.numpy(),
-            color=(0.8, 0.8, 0.8),
-            transparency=0.7,
+            color=(0.216, 0.522, 0.882),
+            transparency=0.5,
         )
 
         # Split solution into individual routes
@@ -684,7 +691,7 @@ class LEHDTrainer(Solver):
         node_colors = []
         for node_idx, node in enumerate(all_nodes):
             if node == depot_index:
-                node_colors.append([1.0, 0.0, 0.0])  # Red for depot
+                node_colors.append([0.0, 0.0, 0.0])  # Red for depot
             else:
                 # Fetch route color, default to gray if not found
                 route_color = node_to_route_color.get(node, [0.5, 0.5, 0.5])
@@ -692,10 +699,11 @@ class LEHDTrainer(Solver):
         node_colors = np.array(node_colors)
 
         ps_nodes = ps.register_point_cloud(
-            "Nodes", node_coords, radius=0.015, enabled=True  # << SMALLER NODES!
+            "Nodes", node_coords, radius=0.01, enabled=True  # << SMALLER NODES!
         )
         ps_nodes.add_color_quantity("Route color", node_colors, enabled=True)
 
+        ps.set_ground_plane_mode("none")
         ps.show()
 
     def _get_geodesic_path(self, geoalg, src_idx, dst_idx):
@@ -709,7 +717,6 @@ class LEHDTrainer(Solver):
 
     def visualize_geodesic_path(self, geodesic_path, route_color, route_idx):
         """Visualizes a geodesic path on a mesh using Polyscope.
-
         Args:
             geodesic_path (np.array): A numpy array of shape (N, 3) representing the 3D coordinates of the geodesic path.
             route_color (tuple): A tuple of three floats representing the RGB color of the route (e.g., (1, 0, 0) for red).
@@ -766,14 +773,27 @@ class LEHDTrainer(Solver):
             student_solution_flags = output[f"test/{key}/student_solution/flags"]
             depots = output[f"test/{key}/depots"]
 
-            for i in range(optimal_solution_nodes.shape[0]):
-                optimal_nodes = optimal_solution_nodes[i]
-                optimal_flags = optimal_solution_flags[i]
-                student_nodes = student_solution_nodes[i]
-                student_flags = student_solution_flags[i]
+            # for i in range(optimal_solution_nodes.shape[0]):
+            #     optimal_nodes = optimal_solution_nodes[i]
+            #     optimal_flags = optimal_solution_flags[i]
+            #     student_nodes = student_solution_nodes[i]
+            #     student_flags = student_solution_flags[i]
 
-                depot = depots[i]
+            #     depot = depots[i]
 
-                # Visualize the solutions
-                self.visualize_single_solution(optimal_nodes, optimal_flags, depot)
-                self.visualize_single_solution(student_nodes, student_flags, depot)
+            #     # Visualize the solutions
+            #     self.visualize_single_solution(optimal_nodes, optimal_flags, depot)
+            #     self.visualize_single_solution(student_nodes, student_flags, depot)
+
+            # Only print the first solutions
+            i = 0
+            optimal_nodes = optimal_solution_nodes[i]
+            optimal_flags = optimal_solution_flags[i]
+            student_nodes = student_solution_nodes[i]
+            student_flags = student_solution_flags[i]
+
+            depot = depots[i]
+
+            # Visualize the solutions
+            self.visualize_single_solution(optimal_nodes, optimal_flags, depot)
+            self.visualize_single_solution(student_nodes, student_flags, depot)

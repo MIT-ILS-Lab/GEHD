@@ -56,5 +56,3 @@ if __name__ == "__main__":
     solver = model(config)
 
     solver.run()
-
-# Different implementation than what LEHD did

@@ -445,16 +445,16 @@ def access_mesh_cvrp_data(
 
 if __name__ == "__main__":
     # Define a common output directory for all data
-    output_dir = "main_model/disk/problems/testing_1"
+    output_dir = "main_model/disk/problems/set_100"
     os.makedirs(output_dir, exist_ok=True)
 
     # Mesh parameters
     mesh_path = "main_model/disk/meshes/sphere.obj"
     mesh_filename = "mesh_data.h5"
-    num_customers = 20
+    # num_customers = 20
 
-    # Generate the mesh city once
-    logging.info(f"Generating mesh city with {num_customers} customers...")
+    # # Generate the mesh city once
+    # logging.info(f"Generating mesh city with {num_customers} customers...")
     # mesh_city, city_size = get_mesh_city(mesh_path, num_customers)
 
     # # Save mesh data separately
@@ -483,8 +483,8 @@ if __name__ == "__main__":
     # )
 
     # Test data parameters - now with multiple problem sizes
-    test_problem_sizes = [10, 20]  # List of different problem sizes
-    test_problem_nums = [100, 100]  # Number of problems per size
+    test_problem_sizes = [200, 500, 1000]  # List of different problem sizes
+    test_problem_nums = [100, 100, 100]  # Number of problems per size
 
     # Generate test problems for each size
     for problem_size, problem_num in zip(test_problem_sizes, test_problem_nums):
@@ -503,13 +503,3 @@ if __name__ == "__main__":
             cap_upper=50,
             max_runtime=5,
         )
-
-    # Access and visualize a problem
-    data = access_mesh_cvrp_data(
-        os.path.join(output_dir, train_filename),
-        os.path.join(output_dir, mesh_filename),
-        0,
-    )
-    print(f"Problem size: {len(data['problem'])}")
-    print(f"Solution distance: {data['distance']}")
-    print(f"Node-flag format: {data['node_flag']}")

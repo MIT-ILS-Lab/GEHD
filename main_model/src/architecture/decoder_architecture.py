@@ -193,11 +193,6 @@ class PointerDecoder(nn.Module):
             ]
         )
 
-        # Layer normalization
-        self.layer_norms = nn.ModuleList(
-            [nn.LayerNorm(embedding_dim) for _ in range(num_layers * 2)]
-        )
-
         # Pointer and flag classifier
         self.pointer = nn.Linear(embedding_dim, 2)
         self.flag_classifier = nn.Linear(embedding_dim, 2)
@@ -211,7 +206,6 @@ class PointerDecoder(nn.Module):
 
         # Process through first transformer layer
         residual = x
-        x = self.layer_norms[0](x)
         x, _ = self.self_attention_layers[0](x, x, x)
         x = x + residual
 
@@ -225,20 +219,17 @@ class PointerDecoder(nn.Module):
             if i == 0:
                 # Already processed first layer
                 residual = x
-                x = self.layer_norms[1](x)
                 x = self.ffn_layers[0](x)
                 x = x + residual
                 continue
 
             # Self-attention with residual connection
             residual = x
-            x = self.layer_norms[i * 2](x)
             x, _ = self.self_attention_layers[i](x, x, x)
             x = x + residual
 
             # Feed-forward with residual connection
             residual = x
-            x = self.layer_norms[i * 2 + 1](x)
             x = self.ffn_layers[i](x)
             x = x + residual
 

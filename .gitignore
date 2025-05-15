@@ -3,7 +3,8 @@ dist
 *.egg-info
 *.egg
 *.obj
-logs
+logs*
+*.logs
 *.txt
 *.log
 *.obj
@@ -17,7 +18,13 @@ disk
 *.wandb
 *.tar
 *.pth
-
+*.npz
+*.h5
+*.png
+*.DS_Store
 events.*
 wandb*
 __pycache__
+*.svg
+*.csv
+*.pdf
