@@ -425,13 +425,12 @@ def access_mesh_cvrp_data(
 
 if __name__ == "__main__":
     # Define a common output directory for all data
-    output_dir = "main_model/disk/problems/set_100_depots"
+    output_dir = "main_model/disk/problems/testing_1"
     os.makedirs(output_dir, exist_ok=True)
 
     # Mesh parameters
     mesh_path = "main_model/disk/meshes/sphere.obj"
-    mesh_filename = "mesh_data.h5"
-    num_customers = 1000
+    num_customers = 20
 
     # Generate the mesh city once
     logging.info(f"Generating mesh city with {num_customers} customers...")
@@ -441,8 +440,9 @@ if __name__ == "__main__":
     save_mesh_data(mesh_city, output_dir, mesh_filename)
 
     # Training data parameters
-    train_problem_size = 100
-    num_problems_train = 100000
+    train_problem_size = 20
+    num_problems_train = 1000
+
     train_filename = f"cvrp_data_train_{train_problem_size}.h5"
 
     # Generate training problems (similar to before)
@@ -461,8 +461,8 @@ if __name__ == "__main__":
     )
 
     # Test data parameters - now with multiple problem sizes
-    test_problem_sizes = [100]  # List of different problem sizes
-    test_problem_nums = [1000]  # Number of problems per size
+    test_problem_sizes = [20]  # List of different problem sizes
+    test_problem_nums = [100]  # Number of problems per size
 
     # Generate test problems for each size
     for problem_size, problem_num in zip(test_problem_sizes, test_problem_nums):

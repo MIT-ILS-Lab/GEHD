@@ -56,23 +56,3 @@ if __name__ == "__main__":
     solver = model(config)
 
     solver.run()
-
-
-# TODO:
-
-# 7. Things to pay attention to:
-#   - 1. The feasibility loss, if to addit and where to get it from
-#   - 4. The mlp / encoder architecture
-
-# 8. Research what training set to choose (real world, terrain, drones, etc., previous studies at best, something to compare to)
-
-# 9. How to train encoder, which output embedding dimension to use
-
-# 10. Fix logging of testing gap if needed
-# 11. Add a gap testing for different sizes, 200, 1000
-# 12. Add ability to load model from checkpoint
-# 13. Add a stopping criterion to not run the whole sequences
-
-# Compare both models for size 200 and 1000 to see which to choose (maybe one is way better than the other)
-# Write function for that, mean and variance for 100, 200, 1000, and plot them
-# Visualize the results on the mesh

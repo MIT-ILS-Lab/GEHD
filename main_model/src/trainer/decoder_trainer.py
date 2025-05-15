@@ -9,8 +9,6 @@ import numpy as np
 import pygeodesic
 
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -25,32 +23,10 @@ from main_model.src.data.decoder_dataloader import (
     get_dataset,
 )
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 logger = logging.getLogger(__name__)
-
-
-def mask_logits(logits_node, solutions):
-    batch_size, num_candidates = logits_node.shape
-
-    # Create a mask with True everywhere
-    mask = torch.ones(
-        (batch_size, num_candidates), dtype=torch.bool, device=logits_node.device
-    )
-
-    # Get indices of nodes that have already been visited
-    visited_nodes = solutions[:, 0, 0].unsqueeze(1)  # Current node
-
-    # Check which candidates match visited nodes
-    candidates = solutions[:, 1:-2, 0]
-    for i in range(batch_size):
-        for j in range(num_candidates):
-            if candidates[i, j] in visited_nodes[i]:
-                mask[i, j] = False
-
-    # Apply the mask to logits_node
-    masked_logits = logits_node.clone()
-    masked_logits[~mask] = torch.tensor(-float("inf"), device=logits_node.device)
-
-    return masked_logits
 
 
 class LEHDTrainer(Solver):
@@ -160,7 +136,7 @@ class LEHDTrainer(Solver):
             self.city_indices = torch.tensor(hf["city_indices"][:], requires_grad=False)
             self.geodesic_matrix = torch.tensor(
                 hf["geodesic_matrix"][:], requires_grad=False
-            )
+            ).to(self.device)
 
         logging.info(f"Loaded mesh data with {len(self.city)} city points")
 
@@ -531,6 +507,9 @@ class LEHDTrainer(Solver):
 
             # 3. If capacity is less than demand, capacity is refilled and flag is changed to 1
             smaller_ = solutions[:, 0, 3] < selected_demands
+
+            # assert smaller_.sum().item() == 0, "Capacity smaller than demand"
+
             solutions[smaller_, :, 3] = capacities[smaller_, None]
             flag_student[smaller_] = 1
 
@@ -594,8 +573,6 @@ class LEHDTrainer(Solver):
 
         # Calculate gap as percentage
         gap = 100 * ((current_best_length - optimal_length) / optimal_length).mean()
-
-        # Return output dictionary for tracker
         if not eval:
             return {
                 f"test/{key}/optimal_score": optimal_length.mean(),
@@ -727,7 +704,6 @@ class LEHDTrainer(Solver):
         ps_nodes.add_color_quantity("Route color", node_colors, enabled=True)
 
         ps.set_ground_plane_mode("none")
-
         ps.show()
 
     def _get_geodesic_path(self, geoalg, src_idx, dst_idx):
