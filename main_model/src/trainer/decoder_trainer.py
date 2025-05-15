@@ -674,8 +674,8 @@ class LEHDTrainer(Solver):
             "Solution Mesh",
             self.vertices.numpy(),
             self.faces.numpy(),
-            color=(0.8, 0.8, 0.8),
-            transparency=0.7,
+            color=(0.216, 0.522, 0.882),
+            transparency=0.5,
         )
 
         # Split solution into individual routes
@@ -714,7 +714,7 @@ class LEHDTrainer(Solver):
         node_colors = []
         for node_idx, node in enumerate(all_nodes):
             if node == depot_index:
-                node_colors.append([1.0, 0.0, 0.0])  # Red for depot
+                node_colors.append([0.0, 0.0, 0.0])  # Red for depot
             else:
                 # Fetch route color, default to gray if not found
                 route_color = node_to_route_color.get(node, [0.5, 0.5, 0.5])
@@ -722,9 +722,11 @@ class LEHDTrainer(Solver):
         node_colors = np.array(node_colors)
 
         ps_nodes = ps.register_point_cloud(
-            "Nodes", node_coords, radius=0.015, enabled=True  # << SMALLER NODES!
+            "Nodes", node_coords, radius=0.01, enabled=True  # << SMALLER NODES!
         )
         ps_nodes.add_color_quantity("Route color", node_colors, enabled=True)
+
+        ps.set_ground_plane_mode("none")
 
         ps.show()
 
@@ -795,14 +797,27 @@ class LEHDTrainer(Solver):
             student_solution_flags = output[f"test/{key}/student_solution/flags"]
             depots = output[f"test/{key}/depots"]
 
-            for i in range(optimal_solution_nodes.shape[0]):
-                optimal_nodes = optimal_solution_nodes[i]
-                optimal_flags = optimal_solution_flags[i]
-                student_nodes = student_solution_nodes[i]
-                student_flags = student_solution_flags[i]
+            # for i in range(optimal_solution_nodes.shape[0]):
+            #     optimal_nodes = optimal_solution_nodes[i]
+            #     optimal_flags = optimal_solution_flags[i]
+            #     student_nodes = student_solution_nodes[i]
+            #     student_flags = student_solution_flags[i]
 
-                depot = depots[i]
+            #     depot = depots[i]
 
-                # Visualize the solutions
-                self.visualize_single_solution(optimal_nodes, optimal_flags, depot)
-                self.visualize_single_solution(student_nodes, student_flags, depot)
+            #     # Visualize the solutions
+            #     self.visualize_single_solution(optimal_nodes, optimal_flags, depot)
+            #     self.visualize_single_solution(student_nodes, student_flags, depot)
+
+            # Only print the first solutions
+            i = 0
+            optimal_nodes = optimal_solution_nodes[i]
+            optimal_flags = optimal_solution_flags[i]
+            student_nodes = student_solution_nodes[i]
+            student_flags = student_solution_flags[i]
+
+            depot = depots[i]
+
+            # Visualize the solutions
+            self.visualize_single_solution(optimal_nodes, optimal_flags, depot)
+            self.visualize_single_solution(student_nodes, student_flags, depot)

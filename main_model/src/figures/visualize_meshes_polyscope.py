@@ -77,7 +77,7 @@ mesh = trimesh.Trimesh(vertices=vertices_3d, faces=np.array(faces))
 # subdivisions = 5
 # mesh = trimesh.creation.icosphere(subdivisions=subdivisions)
 
-# # Torus
+# Torus
 # major_radius = 1.0
 # minor_radius = 0.3
 # major_sections = 100  # circles around main ring
