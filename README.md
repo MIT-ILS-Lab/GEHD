@@ -1,4 +1,4 @@
-# Master Thesis Damian Gerber: Learning to Route on Surfaces, a geodesic NCO model for the Montreal CVRP in 3D
+# Master Thesis Damian Gerber: Learning to Route on Surfaces
 
 This repository contains the implementation of Damian Gerbers Master's thesis at the Massachusetts Institute of Technology (MIT), conducted at the Center for Transportation and Logistics (CTL) in the Intelligent Logistics Systems Lab under the supervision of Prof. Matthias Winkenbach.
 
