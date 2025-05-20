@@ -1,6 +1,6 @@
 # Main Model Implementation
 
-This repository contains the implementation of the GEHD (Geometric Encoder and Heavy Decoder) NCO model for solving CVRP in 3D on arbitrary surfaces using 3D meshes.
+This folder contains the implementation of the GEHD (Geometric Encoder and Heavy Decoder) NCO model for solving CVRP in 3D on arbitrary surfaces using 3D meshes.
 
 ## Contact
 
